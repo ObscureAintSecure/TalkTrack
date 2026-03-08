@@ -1,0 +1,11 @@
+PyQt6>=6.6.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+faster-whisper>=1.0.0
+pyannote.audio>=3.1.0
+torch>=2.0.0
+torchaudio>=2.0.0
+scipy>=1.11.0
+pydub>=0.25.1
+pywin32>=306
+soundfile>=0.12.0

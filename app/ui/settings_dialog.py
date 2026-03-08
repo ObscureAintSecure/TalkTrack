@@ -1,0 +1,225 @@
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
+    QLabel, QComboBox, QSpinBox, QCheckBox, QLineEdit,
+    QPushButton, QFileDialog, QGroupBox, QFormLayout
+)
+from PyQt6.QtCore import Qt
+
+
+class SettingsDialog(QDialog):
+    """Settings dialog for configuring recording and transcription options."""
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.setWindowTitle("Settings")
+        self.setMinimumSize(500, 450)
+        self._setup_ui()
+        self._load_settings()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        tabs = QTabWidget()
+
+        # Audio Tab
+        audio_tab = QWidget()
+        audio_layout = QVBoxLayout(audio_tab)
+
+        audio_group = QGroupBox("Audio Settings")
+        audio_form = QFormLayout(audio_group)
+
+        self.sample_rate_combo = QComboBox()
+        self.sample_rate_combo.addItem("16000 Hz (recommended for speech)", 16000)
+        self.sample_rate_combo.addItem("22050 Hz", 22050)
+        self.sample_rate_combo.addItem("44100 Hz (CD quality)", 44100)
+        self.sample_rate_combo.addItem("48000 Hz", 48000)
+        audio_form.addRow("Sample Rate:", self.sample_rate_combo)
+
+        self.channels_combo = QComboBox()
+        self.channels_combo.addItem("Mono (recommended)", 1)
+        self.channels_combo.addItem("Stereo", 2)
+        audio_form.addRow("Channels:", self.channels_combo)
+
+        audio_layout.addWidget(audio_group)
+        audio_layout.addStretch()
+
+        tabs.addTab(audio_tab, "Audio")
+
+        # Output Tab
+        output_tab = QWidget()
+        output_layout = QVBoxLayout(output_tab)
+
+        output_group = QGroupBox("Output Settings")
+        output_form = QFormLayout(output_group)
+
+        dir_row = QHBoxLayout()
+        self.output_dir_edit = QLineEdit()
+        dir_row.addWidget(self.output_dir_edit)
+        self.browse_btn = QPushButton("Browse...")
+        self.browse_btn.clicked.connect(self._browse_output_dir)
+        dir_row.addWidget(self.browse_btn)
+        output_form.addRow("Output Directory:", dir_row)
+
+        self.format_combo = QComboBox()
+        self.format_combo.addItem("WAV (lossless)", "wav")
+        self.format_combo.addItem("MP3 (compressed, requires FFmpeg)", "mp3")
+        output_form.addRow("Output Format:", self.format_combo)
+
+        output_layout.addWidget(output_group)
+        output_layout.addStretch()
+
+        tabs.addTab(output_tab, "Output")
+
+        # Transcription Tab
+        transcription_tab = QWidget()
+        transcription_layout = QVBoxLayout(transcription_tab)
+
+        whisper_group = QGroupBox("Whisper Transcription")
+        whisper_form = QFormLayout(whisper_group)
+
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("tiny (fastest, least accurate)", "tiny")
+        self.model_combo.addItem("base (fast, good accuracy)", "base")
+        self.model_combo.addItem("small (balanced)", "small")
+        self.model_combo.addItem("medium (slower, better accuracy)", "medium")
+        self.model_combo.addItem("large-v3 (slowest, best accuracy)", "large-v3")
+        whisper_form.addRow("Model Size:", self.model_combo)
+
+        self.device_combo = QComboBox()
+        self.device_combo.addItem("CPU", "cpu")
+        self.device_combo.addItem("CUDA (NVIDIA GPU)", "cuda")
+        whisper_form.addRow("Compute Device:", self.device_combo)
+
+        self.language_edit = QLineEdit()
+        self.language_edit.setPlaceholderText("auto-detect (leave empty)")
+        whisper_form.addRow("Language:", self.language_edit)
+
+        transcription_layout.addWidget(whisper_group)
+
+        # Diarization group
+        diarization_group = QGroupBox("Speaker Diarization")
+        diarization_form = QFormLayout(diarization_group)
+
+        self.diarization_enabled = QCheckBox("Enable speaker diarization")
+        diarization_form.addRow(self.diarization_enabled)
+
+        self.hf_token_edit = QLineEdit()
+        self.hf_token_edit.setPlaceholderText("hf_xxxxxxxxxxxx")
+        self.hf_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        diarization_form.addRow("HuggingFace Token:", self.hf_token_edit)
+
+        token_help = QLabel(
+            '<a href="https://huggingface.co/settings/tokens" '
+            'style="color: #89b4fa;">Get token</a> | '
+            '<a href="https://huggingface.co/pyannote/speaker-diarization-3.1" '
+            'style="color: #89b4fa;">Accept model terms</a>'
+        )
+        token_help.setOpenExternalLinks(True)
+        diarization_form.addRow("", token_help)
+
+        self.min_speakers_spin = QSpinBox()
+        self.min_speakers_spin.setRange(0, 20)
+        self.min_speakers_spin.setSpecialValueText("Auto")
+        diarization_form.addRow("Min Speakers:", self.min_speakers_spin)
+
+        self.max_speakers_spin = QSpinBox()
+        self.max_speakers_spin.setRange(0, 20)
+        self.max_speakers_spin.setSpecialValueText("Auto")
+        diarization_form.addRow("Max Speakers:", self.max_speakers_spin)
+
+        transcription_layout.addWidget(diarization_group)
+        transcription_layout.addStretch()
+
+        tabs.addTab(transcription_tab, "Transcription")
+
+        layout.addWidget(tabs)
+
+        # OK / Cancel buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(cancel_btn)
+
+        ok_btn = QPushButton("Save")
+        ok_btn.clicked.connect(self._save_and_close)
+        btn_row.addWidget(ok_btn)
+
+        layout.addLayout(btn_row)
+
+    def _load_settings(self):
+        # Audio
+        sr = self.config.get("audio", "sample_rate")
+        idx = self.sample_rate_combo.findData(sr)
+        if idx >= 0:
+            self.sample_rate_combo.setCurrentIndex(idx)
+
+        ch = self.config.get("audio", "channels")
+        idx = self.channels_combo.findData(ch)
+        if idx >= 0:
+            self.channels_combo.setCurrentIndex(idx)
+
+        # Output
+        self.output_dir_edit.setText(self.config.get("output", "directory"))
+
+        fmt = self.config.get("output", "format")
+        idx = self.format_combo.findData(fmt)
+        if idx >= 0:
+            self.format_combo.setCurrentIndex(idx)
+
+        # Transcription
+        model = self.config.get("transcription", "model_size")
+        idx = self.model_combo.findData(model)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+
+        device = self.config.get("transcription", "device")
+        idx = self.device_combo.findData(device)
+        if idx >= 0:
+            self.device_combo.setCurrentIndex(idx)
+
+        lang = self.config.get("transcription", "language")
+        if lang:
+            self.language_edit.setText(lang)
+
+        # Diarization
+        self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
+        self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
+
+        min_spk = self.config.get("diarization", "min_speakers")
+        self.min_speakers_spin.setValue(min_spk if min_spk else 0)
+
+        max_spk = self.config.get("diarization", "max_speakers")
+        self.max_speakers_spin.setValue(max_spk if max_spk else 0)
+
+    def _save_and_close(self):
+        self.config.set("audio", "sample_rate", self.sample_rate_combo.currentData())
+        self.config.set("audio", "channels", self.channels_combo.currentData())
+        self.config.set("output", "directory", self.output_dir_edit.text())
+        self.config.set("output", "format", self.format_combo.currentData())
+        self.config.set("transcription", "model_size", self.model_combo.currentData())
+        self.config.set("transcription", "device", self.device_combo.currentData())
+
+        lang = self.language_edit.text().strip()
+        self.config.set("transcription", "language", lang if lang else None)
+
+        self.config.set("diarization", "enabled", self.diarization_enabled.isChecked())
+        self.config.set("diarization", "hf_token", self.hf_token_edit.text().strip())
+
+        min_spk = self.min_speakers_spin.value()
+        self.config.set("diarization", "min_speakers", min_spk if min_spk > 0 else None)
+
+        max_spk = self.max_speakers_spin.value()
+        self.config.set("diarization", "max_speakers", max_spk if max_spk > 0 else None)
+
+        self.config.save()
+        self.accept()
+
+    def _browse_output_dir(self):
+        directory = QFileDialog.getExistingDirectory(
+            self, "Select Output Directory", self.output_dir_edit.text()
+        )
+        if directory:
+            self.output_dir_edit.setText(directory)
