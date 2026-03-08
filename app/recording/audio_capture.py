@@ -86,7 +86,8 @@ class AudioStream:
 class DualAudioCapture:
     """Captures both microphone and system audio simultaneously."""
 
-    def __init__(self, mic_device=None, loopback_device=None, sample_rate=16000):
+    def __init__(self, mic_device=None, loopback_device=None, sample_rate=16000,
+                 capture_mode="legacy", app_pids=None):
         self.sample_rate = sample_rate
         self.mic_device = mic_device
         self.loopback_device = loopback_device
@@ -95,6 +96,8 @@ class DualAudioCapture:
         self._recording = False
         self._start_time = None
         self._elapsed = 0
+        self.capture_mode = capture_mode
+        self.app_pids = app_pids or []
 
     def start(self, output_dir):
         """Start recording both mic and system audio."""
@@ -110,7 +113,14 @@ class DualAudioCapture:
             )
             self.mic_stream.start()
 
-        if self.loopback_device is not None:
+        if self.capture_mode == "per_app" and self.app_pids:
+            from app.recording.process_audio_capture import ProcessAudioCapture
+            self.loopback_stream = ProcessAudioCapture(
+                pids=self.app_pids,
+                sample_rate=self.sample_rate,
+            )
+            self.loopback_stream.start()
+        elif self.loopback_device is not None:
             self.loopback_stream = AudioStream(
                 device_index=self.loopback_device,
                 sample_rate=self.sample_rate,
@@ -120,7 +130,6 @@ class DualAudioCapture:
             try:
                 self.loopback_stream.start()
             except RuntimeError:
-                # Try with 2 channels and downmix later
                 self.loopback_stream = AudioStream(
                     device_index=self.loopback_device,
                     sample_rate=self.sample_rate,
