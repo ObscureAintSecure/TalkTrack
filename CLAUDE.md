@@ -25,6 +25,9 @@ TalkTrack/
   requirements.txt                     # Dependencies
   app/
     main_window.py                     # Main window + orchestration
+    audio/
+      __init__.py                      # Package init
+      segment_player.py               # Audio clip playback for transcript segments
     recording/
       audio_capture.py                 # AudioStream, DualAudioCapture (legacy + per-app modes)
       process_audio_capture.py         # ProcessCaptureStream, ProcessAudioCapture (Win11 per-PID)
@@ -35,9 +38,12 @@ TalkTrack/
     ui/
       source_selector.py              # Mic dropdown + per-app picker (Win11) or legacy loopback (Win10)
       recording_controls.py           # Record/Pause/Stop buttons + timer
+      recording_header.py             # Recording info display with rename
+      segment_widget.py               # Interactive transcript segment row
       settings_dialog.py              # Settings dialog with tabs
+      speaker_name_panel.py           # Collapsible speaker name mapping panel
       status_panel.py                 # System status dialog (dependency health checks)
-      transcript_viewer.py            # Display + export transcripts
+      transcript_viewer.py            # Display + export transcripts (with interactive segments)
       notes_panel.py                  # Call notes with timestamps
       recordings_list.py              # Past recordings browser
     utils/
@@ -52,6 +58,11 @@ TalkTrack/
     test_process_audio_capture.py     # Mixer and capture stream tests
     test_dual_audio_capture.py        # Per-app mode integration tests
     test_dependency_checker.py        # Dependency checker tests
+    test_transcriber.py               # TranscriptSegment/TranscriptResult tests
+    test_segment_player.py            # Audio clip playback tests
+    test_recording_header.py          # RecordingHeader helper tests
+    test_speaker_name_panel.py        # SpeakerNamePanel helper tests
+    test_segment_widget.py            # SegmentWidget helper tests
   docs/plans/                         # Design docs and implementation plans
   recordings/                         # Output directory
 ```
@@ -67,10 +78,13 @@ TalkTrack/
   - Simple mode (no setup): labels "You" vs "Remote" based on mic vs system channels
   - Full diarization (pyannote.audio): identifies individual speakers
 - **System Status Panel:** startup dependency health check (Help > System Status)
+- **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
+- **Speaker naming:** assign friendly names to diarized speakers, saved per recording
+- **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
-- Export transcript to TXT, SRT (subtitles), or JSON
+- Export transcript to TXT, SRT (subtitles), or JSON with speaker names
 - Call notes with timestamp insertion
-- Browse and replay past recordings
+- Browse and replay past recordings (with friendly names)
 - Settings for model size, sample rate, output format (WAV/MP3)
 - Dark theme UI (Catppuccin Mocha palette)
 
@@ -110,6 +124,15 @@ TalkTrack/
 - `SystemStatusDialog` shows results with actionable fix suggestions
 - Auto-shows on startup if critical checks fail
 - Accessible via Help > System Status
+
+### Transcript Enhancement Suite
+- `SegmentWidget`: Interactive row per transcript segment — play button, timestamp, speaker label (clickable), editable text, edit indicator
+- `SpeakerNamePanel`: Collapsible panel mapping speaker IDs (e.g., SPEAKER_00) to friendly names, with color swatches
+- `RecordingHeader`: Shows loaded recording info with inline rename capability
+- `SegmentPlayer`: Plays audio clips for individual segments using sounddevice, caches loaded audio
+- Speaker names stored per recording in `speaker_names.json`, separate from `transcript.json`
+- `TranscriptSegment.original_text` tracks pre-edit text for undo support
+- Signal flow: SegmentWidget → TranscriptViewer → MainWindow (saves to disk)
 
 ### Configuration
 - Stored at ~/.talktrack/settings.json
