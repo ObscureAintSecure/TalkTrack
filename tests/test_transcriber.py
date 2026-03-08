@@ -34,6 +34,15 @@ class TestTranscriptSegment(unittest.TestCase):
         seg = TranscriptSegment(**data)
         self.assertEqual(seg.original_text, "")
 
+    def test_from_dict_ignores_unknown_keys(self):
+        """from_dict should ignore extra keys like speaker_name."""
+        data = {"start": 1.0, "end": 2.0, "text": "hello", "speaker": "SPEAKER_00",
+                "confidence": 0.9, "speaker_name": "Alice", "extra_field": 42}
+        seg = TranscriptSegment.from_dict(data)
+        self.assertEqual(seg.text, "hello")
+        self.assertEqual(seg.speaker, "SPEAKER_00")
+        self.assertFalse(hasattr(seg, "speaker_name"))
+
 
 class TestTranscriptResultExports(unittest.TestCase):
 

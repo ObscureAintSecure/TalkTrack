@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 
 
@@ -12,6 +12,12 @@ class TranscriptSegment:
     speaker: str = ""
     confidence: float = 0.0
     original_text: str = ""
+
+    @classmethod
+    def from_dict(cls, d):
+        """Create a TranscriptSegment from a dict, ignoring unknown keys."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})
 
     def to_dict(self):
         d = {
