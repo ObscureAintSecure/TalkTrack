@@ -72,6 +72,11 @@ class MainWindow(QMainWindow):
         status_action = QAction("&System Status...", self)
         status_action.triggered.connect(self._show_system_status)
         help_menu.addAction(status_action)
+
+        diarization_setup_action = QAction("&Diarization Setup...", self)
+        diarization_setup_action.triggered.connect(self._show_diarization_setup)
+        help_menu.addAction(diarization_setup_action)
+
         help_menu.addSeparator()
 
         about_action = QAction("&About", self)
@@ -389,13 +394,13 @@ class MainWindow(QMainWindow):
                     data = json.load(f)
                 from app.transcription.transcriber import TranscriptSegment
                 result = TranscriptResult(
-                    segments=[TranscriptSegment(**s) for s in data["segments"]],
+                    segments=[TranscriptSegment.from_dict(s) for s in data["segments"]],
                     language=data.get("language", ""),
                     duration=data.get("duration", 0),
                 )
                 self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[MainWindow] Failed to load transcript: {e}")
 
         # Update recording header
         self.recording_header.set_recording(
@@ -478,9 +483,19 @@ class MainWindow(QMainWindow):
         dialog = SystemStatusDialog(self.config, self)
         dialog.exec()
 
+    def _show_diarization_setup(self):
+        from app.ui.diarization_setup import DiarizationSetupWizard
+        wizard = DiarizationSetupWizard(self.config, self)
+        wizard.exec()
+
     def _check_startup_status(self):
         if SystemStatusDialog.should_show_on_startup(self.config):
             self._show_system_status()
+
+        # Auto-show diarization setup wizard if no HF token configured
+        hf_token = self.config.get("diarization", "hf_token")
+        if not hf_token:
+            QTimer.singleShot(300, self._show_diarization_setup)
 
     def _show_about(self):
         QMessageBox.about(
