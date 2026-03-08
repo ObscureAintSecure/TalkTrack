@@ -364,3 +364,54 @@ QToolTip {
     font-size: 12px;
     font-style: italic;
 }
+
+/* Recording Header */
+#recordingName {
+    font-size: 16px;
+    font-weight: bold;
+    color: #cdd6f4;
+}
+
+#recordingNameEdit {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#recordingInfo {
+    color: #a6adc8;
+    font-size: 12px;
+}
+
+#renameButton {
+    padding: 4px 12px;
+    font-size: 12px;
+    min-height: 16px;
+}
+
+/* Segment Widget */
+#segmentPlayBtn {
+    font-size: 11px;
+    border-radius: 14px;
+    background-color: #313244;
+    border: 1px solid #45475a;
+    padding: 0;
+}
+
+#segmentPlayBtn:hover {
+    background-color: #45475a;
+}
+
+/* Speaker Name Panel */
+#speakerPanelToggle {
+    text-align: left;
+    font-weight: bold;
+    color: #89b4fa;
+    font-size: 13px;
+    padding: 4px 0;
+    border: none;
+    background: transparent;
+}
+
+#speakerPanelToggle:hover {
+    color: #b4d0fb;
+}
