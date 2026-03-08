@@ -43,7 +43,8 @@ class Recorder(QObject):
         self._state = state
         self.state_changed.emit(state)
 
-    def start_recording(self, mic_device=None, loopback_device=None):
+    def start_recording(self, mic_device=None, loopback_device=None,
+                        capture_mode="legacy", app_pids=None):
         """Start a new recording session."""
         if self._state != RecordingState.IDLE:
             return
@@ -59,6 +60,8 @@ class Recorder(QObject):
             "started_at": datetime.now().isoformat(),
             "mic_device": mic_device,
             "loopback_device": loopback_device,
+            "capture_mode": capture_mode,
+            "app_pids": app_pids or [],
         }
 
         sample_rate = self.config.get("audio", "sample_rate")
@@ -67,6 +70,8 @@ class Recorder(QObject):
             mic_device=mic_device,
             loopback_device=loopback_device,
             sample_rate=sample_rate,
+            capture_mode=capture_mode,
+            app_pids=app_pids,
         )
 
         try:
