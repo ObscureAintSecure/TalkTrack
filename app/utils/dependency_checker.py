@@ -137,7 +137,7 @@ class DependencyChecker:
 
     def check_pyannote_models(self):
         """Check if pyannote speaker diarization models are cached."""
-        cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / "models--pyannote--speaker-diarization-3.1"
+        cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / "models--pyannote--speaker-diarization-community-1"
         if cache_dir.exists():
             return {
                 "name": "Pyannote Models",

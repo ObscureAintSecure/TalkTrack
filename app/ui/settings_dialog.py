@@ -112,11 +112,16 @@ class SettingsDialog(QDialog):
         token_help = QLabel(
             '<a href="https://huggingface.co/settings/tokens" '
             'style="color: #89b4fa;">Get token</a> | '
-            '<a href="https://huggingface.co/pyannote/speaker-diarization-3.1" '
+            '<a href="https://huggingface.co/pyannote/speaker-diarization-community-1" '
             'style="color: #89b4fa;">Accept model terms</a>'
         )
         token_help.setOpenExternalLinks(True)
         diarization_form.addRow("", token_help)
+
+        self.setup_wizard_btn = QPushButton("Setup Wizard...")
+        self.setup_wizard_btn.setToolTip("Open the step-by-step diarization setup guide")
+        self.setup_wizard_btn.clicked.connect(self._open_setup_wizard)
+        diarization_form.addRow("", self.setup_wizard_btn)
 
         self.min_speakers_spin = QSpinBox()
         self.min_speakers_spin.setRange(0, 20)
@@ -216,6 +221,14 @@ class SettingsDialog(QDialog):
 
         self.config.save()
         self.accept()
+
+    def _open_setup_wizard(self):
+        from app.ui.diarization_setup import DiarizationSetupWizard
+        wizard = DiarizationSetupWizard(self.config, self)
+        if wizard.exec():
+            # Reload diarization settings after wizard saves
+            self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
+            self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
 
     def _browse_output_dir(self):
         directory = QFileDialog.getExistingDirectory(
