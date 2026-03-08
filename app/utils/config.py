@@ -9,6 +9,7 @@ DEFAULT_CONFIG = {
         "channels": 1,
         "mic_device": None,
         "loopback_device": None,
+        "capture_mode": "legacy",
     },
     "output": {
         "directory": str(Path(__file__).parent.parent.parent / "recordings"),
