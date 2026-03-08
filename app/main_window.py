@@ -20,6 +20,7 @@ from app.ui.transcript_viewer import TranscriptViewer
 from app.ui.notes_panel import NotesPanel
 from app.ui.recordings_list import RecordingsList
 from app.ui.settings_dialog import SettingsDialog
+from app.ui.status_panel import SystemStatusDialog
 
 
 class MainWindow(QMainWindow):
@@ -39,6 +40,8 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_statusbar()
         self._connect_signals()
+
+        QTimer.singleShot(500, self._check_startup_status)
 
     def _setup_menu(self):
         menubar = self.menuBar()
@@ -64,6 +67,11 @@ class MainWindow(QMainWindow):
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
+
+        status_action = QAction("&System Status...", self)
+        status_action.triggered.connect(self._show_system_status)
+        help_menu.addAction(status_action)
+        help_menu.addSeparator()
 
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
@@ -361,6 +369,14 @@ class MainWindow(QMainWindow):
         recordings_dir = self.config.get("output", "directory")
         os.makedirs(recordings_dir, exist_ok=True)
         os.startfile(recordings_dir)
+
+    def _show_system_status(self):
+        dialog = SystemStatusDialog(self.config, self)
+        dialog.exec()
+
+    def _check_startup_status(self):
+        if SystemStatusDialog.should_show_on_startup(self.config):
+            self._show_system_status()
 
     def _show_about(self):
         QMessageBox.about(
