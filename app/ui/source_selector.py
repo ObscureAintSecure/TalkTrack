@@ -126,7 +126,7 @@ class SourceSelector(QWidget):
     def _on_mode_changed(self, button_id, checked):
         if not checked:
             return
-        if self.app_list:
+        if self.app_list is not None:
             is_per_app = button_id == 0
             self.app_list.setVisible(is_per_app)
             self.loopback_combo.setVisible(not is_per_app)
@@ -149,36 +149,43 @@ class SourceSelector(QWidget):
 
     def _refresh_app_list(self):
         """Update the app list with currently active audio apps."""
-        if not self.app_list:
+        if self.app_list is None:
             return
 
         try:
             from app.utils.audio_session_monitor import get_active_audio_apps
             apps = get_active_audio_apps()
-        except Exception:
+        except Exception as e:
+            print(f"[SourceSelector] Error refreshing app list: {e}")
             return
 
-        # Remember which PIDs were checked
-        checked_pids = set()
+        # Remember which app names were checked (stable across PID changes)
+        checked_names = set()
         for i in range(self.app_list.count()):
             item = self.app_list.item(i)
             if item.checkState() == Qt.CheckState.Checked:
-                checked_pids.add(item.data(Qt.ItemDataRole.UserRole))
+                checked_names.add(item.text().split("  (")[0])
 
         self.app_list.clear()
 
         for app in apps:
-            item = QListWidgetItem(f"{app['name']}  (PID {app['pid']})")
-            item.setData(Qt.ItemDataRole.UserRole, app["pid"])
+            # Show app name with status indicator
+            if app.get("active", False):
+                label = f"{app['name']}  ({len(app['pids'])} process{'es' if len(app['pids']) > 1 else ''})"
+            else:
+                label = f"{app['name']}  (not in call)"
+            item = QListWidgetItem(label)
+            # Store list of PIDs for this app
+            item.setData(Qt.ItemDataRole.UserRole, app["pids"])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            if app["pid"] in checked_pids:
+            if app["name"] in checked_names:
                 item.setCheckState(Qt.CheckState.Checked)
             else:
                 item.setCheckState(Qt.CheckState.Unchecked)
             self.app_list.addItem(item)
 
         if self.app_list.count() == 0:
-            item = QListWidgetItem("No apps are currently playing audio")
+            item = QListWidgetItem("No audio apps detected")
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             self.app_list.addItem(item)
 
@@ -217,7 +224,7 @@ class SourceSelector(QWidget):
             self.loopback_combo.setCurrentIndex(default_lb_idx)
 
         # Refresh app list too
-        if self._win11 and self.app_list:
+        if self._win11 and self.app_list is not None:
             self._refresh_app_list()
 
         self.devices_changed.emit()
@@ -232,16 +239,22 @@ class SourceSelector(QWidget):
         return self.loopback_combo.currentData()
 
     def get_selected_app_pids(self):
-        """Return list of checked app PIDs (per-app mode only)."""
-        if not self.app_list:
+        """Return list of checked app PIDs (per-app mode only).
+
+        Each app entry may have multiple PIDs (e.g., Zoom runs several
+        processes). All PIDs for checked apps are returned.
+        """
+        if self.app_list is None:
             return []
         pids = []
         for i in range(self.app_list.count()):
             item = self.app_list.item(i)
             if item.checkState() == Qt.CheckState.Checked:
-                pid = item.data(Qt.ItemDataRole.UserRole)
-                if pid is not None:
-                    pids.append(pid)
+                pid_data = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(pid_data, list):
+                    pids.extend(pid_data)
+                elif pid_data is not None:
+                    pids.append(pid_data)
         return pids
 
     def get_capture_mode(self):
@@ -260,7 +273,7 @@ class SourceSelector(QWidget):
         self.mic_combo.setEnabled(enabled)
         self.loopback_combo.setEnabled(enabled)
         self.refresh_btn.setEnabled(enabled)
-        if self.app_list:
+        if self.app_list is not None:
             self.app_list.setEnabled(enabled)
         if self.mode_group:
             self.radio_per_app.setEnabled(enabled)

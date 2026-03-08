@@ -10,9 +10,11 @@ TalkTrack is a Windows desktop application that records, transcribes, and diariz
 - **Audio Capture:** sounddevice + WASAPI, comtypes (Win11 per-process capture)
 - **Audio Session Enumeration:** pycaw (Windows Core Audio API)
 - **Transcription:** faster-whisper (local OpenAI Whisper, no internet needed)
-- **Speaker Diarization:** pyannote.audio (requires free HuggingFace token)
+- **Speaker Diarization:** pyannote.audio 4.0 (requires free HuggingFace token)
 - **Deep Learning:** torch, torchaudio
 - **Audio Processing:** scipy, pydub, soundfile, numpy
+- **Process Detection:** psutil (for known audio app enumeration)
+- **NLP/Embeddings:** transformers, sentence-transformers (pyannote dependencies)
 - **Windows Integration:** pywin32, comtypes
 
 ## Project Structure
@@ -91,8 +93,10 @@ TalkTrack/
 - Output files per recording: mic_audio.wav, system_audio.wav, combined_audio.wav
 
 ### Audio Session Monitoring
-- `audio_session_monitor.py` uses pycaw to enumerate active audio sessions
-- Returns process names/PIDs of apps producing audio
+- `audio_session_monitor.py` uses pycaw + psutil to enumerate audio apps
+- Two sources: pycaw (apps with active audio sessions) + psutil (known audio apps like Teams/Zoom even when not in a call)
+- Groups by display name (deduplicates multi-process apps like Zoom)
+- Returns `{"pids": [int], "name": str, "process_name": str, "active": bool}`
 - Auto-refreshes every 3 seconds in the UI
 
 ### Recording Pipeline
@@ -124,8 +128,7 @@ python main.py
 ### For Full Speaker Diarization (Optional)
 1. Get a free HuggingFace token at https://huggingface.co/settings/tokens
 2. Accept the pyannote model terms at:
-   - https://huggingface.co/pyannote/speaker-diarization-3.1
-   - https://huggingface.co/pyannote/segmentation-3.0
+   - https://huggingface.co/pyannote/speaker-diarization-community-1
 3. Enter your token in Settings > Transcription > HuggingFace Token
 
 ### Usage During a Teams Call
@@ -154,6 +157,13 @@ python -m pytest tests/ -v
 When running shell commands:
 - Avoid complex chained commands with `&&`, `||`, or pipes when possible
 - Run simple, single-purpose commands sequentially instead
+
+## Platform Workarounds
+
+- **PyQt6 + PyTorch DLL conflict:** QApplication modifies Windows DLL search order, breaking torch's c10.dll loading in QThreads. Fixed by calling `os.add_dll_directory(torch/lib)` before QApplication init (in main.py).
+- **torchcodec not available on Windows:** pyannote.audio 4.0 uses torchcodec for audio decoding, which requires FFmpeg DLLs. Workaround: pre-load audio via soundfile and pass as `{"waveform": tensor, "sample_rate": int}` dict to pyannote pipeline.
+- **torchcodec warning suppression:** `warnings.filterwarnings("ignore", module=r"pyannote\.audio\.core\.io")` in main.py.
+- **PyQt6 QListWidget truthiness:** Empty QListWidget evaluates as falsy in PyQt6. Always use `is None` / `is not None` checks, never `if widget:` / `if not widget:`.
 
 ## Known Limitations
 

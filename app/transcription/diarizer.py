@@ -38,14 +38,28 @@ class DiarizationWorker(QThread):
                     "HuggingFace token required for pyannote.audio. "
                     "Get one at https://huggingface.co/settings/tokens and "
                     "accept the model terms at "
-                    "https://huggingface.co/pyannote/speaker-diarization-3.1"
+                    "https://huggingface.co/pyannote/speaker-diarization-community-1"
                 )
                 return
 
             pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
-                use_auth_token=self.hf_token,
+                "pyannote/speaker-diarization-community-1",
+                token=self.hf_token,
             )
+
+            self.progress.emit("Loading audio for diarization...")
+
+            # Pre-load audio via soundfile to avoid torchcodec dependency.
+            # pyannote 4.0 accepts {"waveform": tensor, "sample_rate": int}.
+            import soundfile as sf
+            import torch
+
+            audio_data, sample_rate = sf.read(self.audio_path, dtype="float32")
+            if audio_data.ndim == 1:
+                waveform = torch.from_numpy(audio_data).unsqueeze(0)
+            else:
+                waveform = torch.from_numpy(audio_data.T)
+            audio_input = {"waveform": waveform, "sample_rate": sample_rate}
 
             self.progress.emit("Running speaker diarization...")
 
@@ -55,7 +69,13 @@ class DiarizationWorker(QThread):
             if self.max_speakers is not None:
                 diarization_params["max_speakers"] = self.max_speakers
 
-            diarization = pipeline(self.audio_path, **diarization_params)
+            result = pipeline(audio_input, **diarization_params)
+
+            # pyannote 4.0 returns DiarizeOutput; extract the Annotation
+            if hasattr(result, "speaker_diarization"):
+                diarization = result.speaker_diarization
+            else:
+                diarization = result  # fallback for older versions
 
             # Extract speaker segments
             speaker_segments = []
