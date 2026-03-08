@@ -54,7 +54,7 @@ python main.py
 
 ### Speaker Diarization (Optional)
 
-For multi-speaker identification, TalkTrack uses pyannote.audio which requires a free HuggingFace account. On first launch, a setup wizard walks you through the steps:
+For multi-speaker identification (speaker 1, speaker 2, etc...), TalkTrack uses pyannote.audio which requires a free HuggingFace account. On first launch, a setup wizard walks you through the steps:
 
 1. Create a free account at [huggingface.co](https://huggingface.co/join)
 2. Accept the model license at [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
