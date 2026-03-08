@@ -130,6 +130,12 @@ QComboBox QAbstractItemView {
     color: #cdd6f4;
     border: 1px solid #45475a;
     selection-background-color: #45475a;
+    font-size: 13px;
+}
+
+QComboBox QAbstractItemView::item {
+    padding: 4px 8px;
+    min-height: 20px;
 }
 
 /* Labels */
