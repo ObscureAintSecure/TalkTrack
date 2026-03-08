@@ -9,7 +9,7 @@ QWidget {
     background-color: #1e1e2e;
     color: #cdd6f4;
     font-family: "Segoe UI", sans-serif;
-    font-size: 13px;
+    font-size: 10pt;
 }
 
 /* Menu Bar */
@@ -130,7 +130,7 @@ QComboBox QAbstractItemView {
     color: #cdd6f4;
     border: 1px solid #45475a;
     selection-background-color: #45475a;
-    font-size: 13px;
+    font-size: 10pt;
 }
 
 QComboBox QAbstractItemView::item {
@@ -195,6 +195,50 @@ QListWidget::item:selected {
 
 QListWidget::item:hover {
     background-color: #313244;
+}
+
+/* Capture mode radio buttons */
+QRadioButton#captureMode {
+    background-color: #181825;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-weight: bold;
+    font-size: 13px;
+    spacing: 8px;
+}
+
+QRadioButton#captureMode:checked {
+    border-color: #89b4fa;
+    color: #89b4fa;
+}
+
+QRadioButton#captureMode:hover {
+    border-color: #585b70;
+    background-color: #1e1e2e;
+}
+
+QRadioButton#captureMode::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    border: 2px solid #45475a;
+    background-color: #313244;
+}
+
+QRadioButton#captureMode::indicator:checked {
+    background-color: #89b4fa;
+    border-color: #89b4fa;
+}
+
+/* Compact app audio list */
+#appAudioList {
+    padding: 2px;
+}
+
+#appAudioList::item {
+    padding: 2px 6px;
+    margin: 0px;
 }
 
 /* Tabs */
@@ -414,4 +458,65 @@ QToolTip {
 
 #speakerPanelToggle:hover {
     color: #b4d0fb;
+}
+
+/* Diarization Setup Wizard */
+#wizardHeader {
+    font-size: 18px;
+    font-weight: bold;
+    color: #cdd6f4;
+    margin-bottom: 4px;
+}
+
+#wizardStep {
+    background-color: #181825;
+    border: 1px solid #313244;
+    border-radius: 8px;
+}
+
+#wizardStepNumber {
+    background-color: #89b4fa;
+    color: #1e1e2e;
+    font-size: 14px;
+    font-weight: bold;
+    border-radius: 16px;
+}
+
+#wizardStepTitle {
+    font-size: 13px;
+    font-weight: bold;
+    color: #cdd6f4;
+}
+
+#wizardStepDesc {
+    font-size: 12px;
+    color: #a6adc8;
+}
+
+#wizardActionBtn {
+    background-color: #313244;
+    color: #89b4fa;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+#wizardActionBtn:hover {
+    background-color: #45475a;
+    border-color: #89b4fa;
+}
+
+#wizardSaveBtn {
+    background-color: #89b4fa;
+    color: #1e1e2e;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+}
+
+#wizardSaveBtn:hover {
+    background-color: #b4d0fb;
 }

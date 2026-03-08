@@ -88,7 +88,9 @@ class SourceSelector(QWidget):
         """Per-app audio picker (Win11)."""
         self.mode_group = QButtonGroup(self)
         self.radio_per_app = QRadioButton("Capture selected apps only")
+        self.radio_per_app.setObjectName("captureMode")
         self.radio_legacy = QRadioButton("Capture all system audio (legacy)")
+        self.radio_legacy.setObjectName("captureMode")
         self.mode_group.addButton(self.radio_per_app, 0)
         self.mode_group.addButton(self.radio_legacy, 1)
         self.radio_per_app.setChecked(True)
@@ -102,8 +104,9 @@ class SourceSelector(QWidget):
         parent_layout.addWidget(app_label)
 
         self.app_list = QListWidget()
-        self.app_list.setMinimumHeight(120)
-        self.app_list.setMaximumHeight(200)
+        self.app_list.setObjectName("appAudioList")
+        self.app_list.setMinimumHeight(100)
+        self.app_list.setMaximumHeight(180)
         parent_layout.addWidget(self.app_list)
 
         parent_layout.addWidget(self.radio_legacy)
