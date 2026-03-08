@@ -21,6 +21,7 @@ from app.ui.notes_panel import NotesPanel
 from app.ui.recordings_list import RecordingsList
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.status_panel import SystemStatusDialog
+from app.ui.recording_header import RecordingHeader
 
 
 class MainWindow(QMainWindow):
@@ -110,6 +111,10 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(8, 8, 8, 8)
 
+        # Recording header (above tabs)
+        self.recording_header = RecordingHeader()
+        right_layout.addWidget(self.recording_header)
+
         self.tabs = QTabWidget()
 
         # Transcript tab
@@ -149,6 +154,13 @@ class MainWindow(QMainWindow):
 
         # Recordings list
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
+
+        # Recording header
+        self.recording_header.name_changed.connect(self._on_recording_renamed)
+
+        # Transcript editing
+        self.transcript_viewer.transcript_changed.connect(self._save_transcript)
+        self.transcript_viewer.speaker_names_changed.connect(self._save_speaker_names)
 
     def _start_recording(self):
         mic = self.source_selector.get_selected_mic()
@@ -224,6 +236,9 @@ class MainWindow(QMainWindow):
 
         # Switch to transcript tab
         self.tabs.setCurrentWidget(self.transcript_viewer)
+
+        # Update recording header
+        self.recording_header.set_recording(session)
 
         # Auto-start transcription if audio available
         if audio_for_transcript:
@@ -318,20 +333,30 @@ class MainWindow(QMainWindow):
 
     def _display_final_transcript(self, result):
         self.transcript_viewer.hide_progress()
-        self.transcript_viewer.display_transcript(result)
+
+        # Load speaker names if available
+        speaker_names = {}
+        if self._current_session:
+            names_path = Path(self._current_session["directory"]) / "speaker_names.json"
+            if names_path.exists():
+                try:
+                    with open(names_path, "r", encoding="utf-8") as f:
+                        speaker_names = json.load(f)
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+        self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
         self.status_label.setText("Transcription complete.")
 
-        # Save transcript to session directory
+        # Update recording header with speaker count
         if self._current_session:
-            transcript_path = Path(self._current_session["directory"]) / "transcript.json"
-            with open(transcript_path, "w", encoding="utf-8") as f:
-                json.dump(result.to_dict(), f, indent=2, ensure_ascii=False)
+            self.recording_header.set_recording(
+                self._current_session,
+                speaker_count=self.transcript_viewer.get_speaker_count()
+            )
 
-            txt_path = Path(self._current_session["directory"]) / "transcript.txt"
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(result.to_text())
-
-            self.recordings_list.refresh()
+        # Save transcript
+        self._save_transcript()
 
     def _on_transcription_error(self, error_msg):
         self.transcript_viewer.hide_progress()
@@ -346,6 +371,16 @@ class MainWindow(QMainWindow):
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")
         self.transcript_viewer.set_audio_path(audio_path)
 
+        # Load speaker names
+        speaker_names = {}
+        names_path = Path(metadata["directory"]) / "speaker_names.json"
+        if names_path.exists():
+            try:
+                with open(names_path, "r", encoding="utf-8") as f:
+                    speaker_names = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+
         # Load existing transcript if available
         transcript_path = Path(metadata["directory"]) / "transcript.json"
         if transcript_path.exists():
@@ -358,15 +393,69 @@ class MainWindow(QMainWindow):
                     language=data.get("language", ""),
                     duration=data.get("duration", 0),
                 )
-                self.transcript_viewer.display_transcript(result)
+                self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
             except Exception:
                 pass
+
+        # Update recording header
+        self.recording_header.set_recording(
+            metadata,
+            speaker_count=self.transcript_viewer.get_speaker_count()
+        )
 
         # Load notes
         self.notes_panel.set_session_dir(metadata["directory"])
 
         # Switch to transcript tab
         self.tabs.setCurrentWidget(self.transcript_viewer)
+
+    def _save_transcript(self):
+        """Save current transcript to session directory."""
+        if not self._current_session or not self.transcript_viewer._transcript:
+            return
+        result = self.transcript_viewer._transcript
+        names = self.transcript_viewer._speaker_names
+
+        transcript_path = Path(self._current_session["directory"]) / "transcript.json"
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            json.dump(result.to_dict(speaker_names=names), f, indent=2, ensure_ascii=False)
+
+        txt_path = Path(self._current_session["directory"]) / "transcript.txt"
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(result.to_text(speaker_names=names))
+
+        self.recordings_list.refresh()
+
+    def _save_speaker_names(self, names):
+        """Save speaker names to session directory."""
+        if not self._current_session:
+            return
+        names_path = Path(self._current_session["directory"]) / "speaker_names.json"
+        with open(names_path, "w", encoding="utf-8") as f:
+            json.dump(names, f, indent=2, ensure_ascii=False)
+
+        # Also re-save transcript with updated names
+        self._save_transcript()
+
+    def _on_recording_renamed(self, new_name):
+        """Handle recording rename from RecordingHeader."""
+        if not self._current_session:
+            return
+        self._current_session["name"] = new_name
+
+        # Update metadata.json
+        meta_path = Path(self._current_session["directory"]) / "metadata.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+                metadata["name"] = new_name
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"Failed to save recording name: {e}")
+
+        self.recordings_list.refresh()
 
     def _on_error(self, error_msg):
         self.status_label.setText(f"Error: {error_msg}")
