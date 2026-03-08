@@ -1,0 +1,337 @@
+/* Dark theme for Evaer Clone */
+
+QMainWindow, QDialog {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+}
+
+QWidget {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    font-family: "Segoe UI", sans-serif;
+    font-size: 13px;
+}
+
+/* Menu Bar */
+QMenuBar {
+    background-color: #181825;
+    color: #cdd6f4;
+    border-bottom: 1px solid #313244;
+    padding: 2px;
+}
+
+QMenuBar::item:selected {
+    background-color: #45475a;
+    border-radius: 4px;
+}
+
+QMenu {
+    background-color: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+QMenu::item:selected {
+    background-color: #45475a;
+    border-radius: 4px;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 500;
+    min-height: 20px;
+}
+
+QPushButton:hover {
+    background-color: #45475a;
+    border-color: #585b70;
+}
+
+QPushButton:pressed {
+    background-color: #585b70;
+}
+
+QPushButton:disabled {
+    background-color: #1e1e2e;
+    color: #585b70;
+    border-color: #313244;
+}
+
+QPushButton#recordButton {
+    background-color: #f38ba8;
+    color: #1e1e2e;
+    font-weight: bold;
+    font-size: 14px;
+    border: none;
+    min-width: 100px;
+    min-height: 36px;
+}
+
+QPushButton#recordButton:hover {
+    background-color: #eba0ac;
+}
+
+QPushButton#recordButton:disabled {
+    background-color: #45475a;
+    color: #585b70;
+}
+
+QPushButton#stopButton {
+    background-color: #a6adc8;
+    color: #1e1e2e;
+    font-weight: bold;
+    border: none;
+    min-width: 80px;
+}
+
+QPushButton#stopButton:hover {
+    background-color: #bac2de;
+}
+
+QPushButton#pauseButton {
+    background-color: #fab387;
+    color: #1e1e2e;
+    font-weight: bold;
+    border: none;
+    min-width: 80px;
+}
+
+QPushButton#pauseButton:hover {
+    background-color: #f9e2af;
+}
+
+/* Combo boxes */
+QComboBox {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-height: 20px;
+}
+
+QComboBox:hover {
+    border-color: #585b70;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #1e1e2e;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    selection-background-color: #45475a;
+}
+
+/* Labels */
+QLabel {
+    color: #cdd6f4;
+    background: transparent;
+}
+
+QLabel#timerLabel {
+    font-size: 28px;
+    font-weight: bold;
+    color: #cdd6f4;
+    font-family: "Consolas", "Courier New", monospace;
+}
+
+QLabel#recordingIndicator {
+    color: #f38ba8;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+QLabel#sectionHeader {
+    font-size: 14px;
+    font-weight: bold;
+    color: #89b4fa;
+    padding: 4px 0;
+}
+
+/* Text areas */
+QTextEdit, QPlainTextEdit {
+    background-color: #181825;
+    color: #cdd6f4;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    padding: 8px;
+    selection-background-color: #45475a;
+}
+
+/* List widgets */
+QListWidget {
+    background-color: #181825;
+    color: #cdd6f4;
+    border: 1px solid #313244;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget::item {
+    padding: 8px;
+    border-radius: 4px;
+    margin: 2px;
+}
+
+QListWidget::item:selected {
+    background-color: #45475a;
+}
+
+QListWidget::item:hover {
+    background-color: #313244;
+}
+
+/* Tabs */
+QTabWidget::pane {
+    border: 1px solid #313244;
+    border-radius: 6px;
+    background-color: #1e1e2e;
+}
+
+QTabBar::tab {
+    background-color: #181825;
+    color: #a6adc8;
+    border: 1px solid #313244;
+    border-bottom: none;
+    padding: 8px 16px;
+    margin-right: 2px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+
+QTabBar::tab:selected {
+    background-color: #1e1e2e;
+    color: #89b4fa;
+    border-bottom: 2px solid #89b4fa;
+}
+
+QTabBar::tab:hover {
+    background-color: #313244;
+}
+
+/* Scroll bars */
+QScrollBar:vertical {
+    background-color: #181825;
+    width: 10px;
+    margin: 0;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #45475a;
+    min-height: 30px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #585b70;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+/* Group boxes */
+QGroupBox {
+    border: 1px solid #313244;
+    border-radius: 8px;
+    margin-top: 8px;
+    padding-top: 16px;
+    font-weight: bold;
+    color: #89b4fa;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 6px;
+}
+
+/* Progress bar */
+QProgressBar {
+    background-color: #313244;
+    border: none;
+    border-radius: 6px;
+    text-align: center;
+    color: #cdd6f4;
+    min-height: 20px;
+}
+
+QProgressBar::chunk {
+    background-color: #89b4fa;
+    border-radius: 6px;
+}
+
+/* Status bar */
+QStatusBar {
+    background-color: #181825;
+    color: #a6adc8;
+    border-top: 1px solid #313244;
+}
+
+/* Splitter */
+QSplitter::handle {
+    background-color: #313244;
+    width: 2px;
+    height: 2px;
+}
+
+/* Line Edit */
+QLineEdit {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+QLineEdit:focus {
+    border-color: #89b4fa;
+}
+
+/* Spin Box */
+QSpinBox {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+
+/* Check Box */
+QCheckBox {
+    color: #cdd6f4;
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 2px solid #45475a;
+    background-color: #313244;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #89b4fa;
+    border-color: #89b4fa;
+}
+
+/* Tooltips */
+QToolTip {
+    background-color: #313244;
+    color: #cdd6f4;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    padding: 4px 8px;
+}
