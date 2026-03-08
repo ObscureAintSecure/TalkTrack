@@ -11,15 +11,19 @@ class TranscriptSegment:
     text: str
     speaker: str = ""
     confidence: float = 0.0
+    original_text: str = ""
 
     def to_dict(self):
-        return {
+        d = {
             "start": self.start,
             "end": self.end,
             "text": self.text,
             "speaker": self.speaker,
             "confidence": self.confidence,
         }
+        if self.original_text:
+            d["original_text"] = self.original_text
+        return d
 
 
 @dataclass
