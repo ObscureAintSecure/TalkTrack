@@ -71,6 +71,7 @@ class RecordingsList(QWidget):
             self._recordings.append(metadata)
 
             # Format display text
+            name = metadata.get("name", "")
             started = metadata.get("started_at", "")
             try:
                 dt = datetime.fromisoformat(started)
@@ -84,7 +85,10 @@ class RecordingsList(QWidget):
             has_transcript = (Path(metadata["directory"]) / "transcript.json").exists()
             transcript_indicator = " [T]" if has_transcript else ""
 
-            text = f"{date_str}  |  {dur_str}{transcript_indicator}"
+            if name:
+                text = f"{name}  |  {date_str}  |  {dur_str}{transcript_indicator}"
+            else:
+                text = f"{date_str}  |  {dur_str}{transcript_indicator}"
             item = QListWidgetItem(text)
             item.setData(Qt.ItemDataRole.UserRole, metadata)
             self.list_widget.addItem(item)
