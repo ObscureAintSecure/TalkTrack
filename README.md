@@ -73,6 +73,66 @@ Without this setup, TalkTrack still works — it just labels speakers as "You" a
 
 **Windows 10:** Captures all system audio via WASAPI loopback.
 
+## How Transcription Works
+
+TalkTrack uses [Faster Whisper](https://github.com/SYSTRAN/faster-whisper), a CTranslate2-optimized version of OpenAI's Whisper model. Everything runs locally — no audio is sent to any server.
+
+### Pipeline
+
+1. **Recording** — Audio is captured as dual tracks: your microphone and system/app audio. Both are saved as WAV files alongside a `combined_audio.wav` used for transcription.
+2. **Transcription** — When recording stops, Faster Whisper processes `combined_audio.wav` and produces timestamped text segments. VAD (Voice Activity Detection) filtering skips silence automatically.
+3. **Speaker Diarization** — Speakers are identified and labeled on each segment (see below).
+4. **Review** — The interactive transcript viewer lets you play back individual segments, edit text inline, and assign friendly names to speakers. Changes are saved to `transcript.json` and `speaker_names.json` in the recording directory.
+
+### Whisper Models
+
+Choose a model in **Settings > Transcription** based on your speed/accuracy needs:
+
+| Model | Size | Speed | Accuracy | VRAM (GPU) |
+|-------|------|-------|----------|------------|
+| `tiny` | ~75 MB | Fastest | Basic | ~1 GB |
+| `base` | ~145 MB | Fast | Good | ~1 GB |
+| `small` | ~480 MB | Moderate | Better | ~2 GB |
+| `medium` | ~1.5 GB | Slow | Great | ~5 GB |
+| `large-v3` | ~3 GB | Slowest | Best | ~10 GB |
+
+Models are downloaded automatically on first use and cached locally. No internet is needed after the initial download.
+
+### CPU vs GPU
+
+- **CPU** (`int8` quantization) — works on any machine, no extra setup. Good enough for most use cases.
+- **CUDA** (`float16`) — significantly faster if you have an NVIDIA GPU with CUDA installed. Select "CUDA (NVIDIA GPU)" in Settings > Transcription > Compute Device.
+
+### Language
+
+By default, Whisper auto-detects the spoken language. You can set a specific language in Settings > Transcription > Language (e.g., `en`, `es`, `de`) to improve accuracy and speed if you know what language will be spoken.
+
+## Speaker Diarization
+
+Speaker diarization identifies *who* is speaking at each point in the transcript. TalkTrack offers two modes:
+
+### Simple Mode (No Setup)
+
+Works out of the box. Compares audio energy between your microphone track and the system/app audio track to label each segment as **"You"** or **"Remote"**. Best for 1-on-1 calls.
+
+### Full Diarization (pyannote.audio)
+
+Uses the [pyannote.audio](https://github.com/pyannote/pyannote-audio) neural pipeline to identify individual speakers (SPEAKER_00, SPEAKER_01, etc.). Works for any number of participants. Requires a free HuggingFace account — see [Speaker Diarization setup](#speaker-diarization-optional) above.
+
+You can optionally set min/max speaker counts in Settings to help the model when you know how many people are on the call.
+
+After diarization, use the **Speaker Name Panel** in the transcript viewer to map generic labels (SPEAKER_00) to real names. Names are saved per recording and included in exports.
+
+## Export Formats
+
+| Format | Description |
+|--------|-------------|
+| **TXT** | Plain text with timestamps and speaker labels |
+| **SRT** | Subtitle format, compatible with video players |
+| **JSON** | Structured data with all segment metadata |
+
+All exports include speaker names if assigned.
+
 ## Settings
 
 Access via the gear icon or **Edit > Settings**:
@@ -80,9 +140,12 @@ Access via the gear icon or **Edit > Settings**:
 | Setting | Options | Default |
 |---------|---------|---------|
 | Whisper Model | tiny, base, small, medium, large-v3 | small |
-| Sample Rate | 16000, 44100, 48000 Hz | 16000 |
-| Output Format | WAV, MP3 | WAV |
+| Compute Device | CPU, CUDA (NVIDIA GPU) | CPU |
+| Language | Auto-detect, or specify (en, es, etc.) | Auto-detect |
+| Sample Rate | 16000, 22050, 44100, 48000 Hz | 16000 |
+| Output Format | WAV, MP3 (requires FFmpeg) | WAV |
 | Capture Mode | Per-app (Win11) or Legacy | Auto-detected |
+| Diarization | Enabled/Disabled, min/max speakers | Disabled |
 
 ## Project Structure
 
