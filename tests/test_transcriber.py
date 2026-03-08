@@ -35,5 +35,60 @@ class TestTranscriptSegment(unittest.TestCase):
         self.assertEqual(seg.original_text, "")
 
 
+class TestTranscriptResultExports(unittest.TestCase):
+
+    def _make_result(self):
+        return TranscriptResult(
+            segments=[
+                TranscriptSegment(start=0.0, end=5.0, text="Hello everyone", speaker="SPEAKER_00"),
+                TranscriptSegment(start=5.0, end=10.0, text="Hi there", speaker="SPEAKER_01"),
+            ],
+            language="en",
+            duration=10.0,
+        )
+
+    def test_to_text_without_speaker_names(self):
+        result = self._make_result()
+        text = result.to_text()
+        self.assertIn("[SPEAKER_00]", text)
+        self.assertIn("[SPEAKER_01]", text)
+
+    def test_to_text_with_speaker_names(self):
+        result = self._make_result()
+        names = {"SPEAKER_00": "Alice", "SPEAKER_01": "Bob"}
+        text = result.to_text(speaker_names=names)
+        self.assertIn("[Alice]", text)
+        self.assertIn("[Bob]", text)
+        self.assertNotIn("SPEAKER_00", text)
+
+    def test_to_text_with_partial_speaker_names(self):
+        result = self._make_result()
+        names = {"SPEAKER_00": "Alice"}
+        text = result.to_text(speaker_names=names)
+        self.assertIn("[Alice]", text)
+        self.assertIn("[SPEAKER_01]", text)
+
+    def test_to_srt_with_speaker_names(self):
+        result = self._make_result()
+        names = {"SPEAKER_00": "Alice"}
+        srt = result.to_srt(speaker_names=names)
+        self.assertIn("[Alice]", srt)
+        self.assertIn("[SPEAKER_01]", srt)
+
+    def test_to_dict_with_speaker_names(self):
+        result = self._make_result()
+        names = {"SPEAKER_00": "Alice", "SPEAKER_01": "Bob"}
+        d = result.to_dict(speaker_names=names)
+        self.assertEqual(d["segments"][0]["speaker_name"], "Alice")
+        self.assertEqual(d["segments"][1]["speaker_name"], "Bob")
+        # Original speaker IDs preserved
+        self.assertEqual(d["segments"][0]["speaker"], "SPEAKER_00")
+
+    def test_to_dict_without_speaker_names_has_no_speaker_name_key(self):
+        result = self._make_result()
+        d = result.to_dict()
+        self.assertNotIn("speaker_name", d["segments"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

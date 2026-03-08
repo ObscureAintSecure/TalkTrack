@@ -32,27 +32,43 @@ class TranscriptResult:
     language: str = ""
     duration: float = 0.0
 
-    def to_dict(self):
+    def _display_speaker(self, seg, speaker_names=None):
+        """Return the display name for a segment's speaker."""
+        if not seg.speaker:
+            return ""
+        if speaker_names and seg.speaker in speaker_names and speaker_names[seg.speaker]:
+            return speaker_names[seg.speaker]
+        return seg.speaker
+
+    def to_dict(self, speaker_names=None):
+        segments = []
+        for s in self.segments:
+            d = s.to_dict()
+            if speaker_names and s.speaker in speaker_names and speaker_names[s.speaker]:
+                d["speaker_name"] = speaker_names[s.speaker]
+            segments.append(d)
         return {
-            "segments": [s.to_dict() for s in self.segments],
+            "segments": segments,
             "language": self.language,
             "duration": self.duration,
         }
 
-    def to_text(self):
+    def to_text(self, speaker_names=None):
         lines = []
         for seg in self.segments:
-            speaker = f"[{seg.speaker}] " if seg.speaker else ""
+            display = self._display_speaker(seg, speaker_names)
+            speaker = f"[{display}] " if display else ""
             timestamp = f"[{_format_time(seg.start)} -> {_format_time(seg.end)}]"
             lines.append(f"{timestamp} {speaker}{seg.text}")
         return "\n".join(lines)
 
-    def to_srt(self):
+    def to_srt(self, speaker_names=None):
         lines = []
         for i, seg in enumerate(self.segments, 1):
             start_ts = _format_srt_time(seg.start)
             end_ts = _format_srt_time(seg.end)
-            speaker = f"[{seg.speaker}] " if seg.speaker else ""
+            display = self._display_speaker(seg, speaker_names)
+            speaker = f"[{display}] " if display else ""
             lines.append(f"{i}")
             lines.append(f"{start_ts} --> {end_ts}")
             lines.append(f"{speaker}{seg.text}")
