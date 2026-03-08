@@ -1,2 +1,2 @@
 Set-Location $PSScriptRoot
-python main.py
+Start-Process pythonw main.py
