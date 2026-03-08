@@ -9,6 +9,8 @@ TalkTrack is a Windows desktop app that captures audio from Teams, Zoom, and oth
 ![UI](https://img.shields.io/badge/UI-PyQt6-41CD52)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
+![TalkTrack screenshot](resources/screenshot.jpg)
+
 ## Features
 
 - **Record calls** with Record / Pause / Resume / Stop controls and a live timer
