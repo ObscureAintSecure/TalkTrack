@@ -1,17 +1,17 @@
+"""Transcript viewer with interactive segment editing, playback, and speaker naming."""
 import json
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-    QLabel, QProgressBar, QFileDialog, QComboBox
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLabel, QProgressBar, QFileDialog, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QTextCharFormat, QColor, QFont, QTextCursor
 
-from app.transcription.transcriber import TranscriptResult
+from app.transcription.transcriber import TranscriptResult, TranscriptSegment
 
 
-# Speaker colors for visual distinction
+# Speaker colors for visual distinction — shared constant
 SPEAKER_COLORS = [
     "#89b4fa",  # blue
     "#a6e3a1",  # green
@@ -25,21 +25,36 @@ SPEAKER_COLORS = [
 
 
 class TranscriptViewer(QWidget):
-    """Displays transcription results with speaker labels and colors."""
+    """Displays transcription results with interactive segments.
+
+    Features:
+    - Per-segment play buttons for audio clip playback
+    - Inline text editing with undo (original_text preservation)
+    - Speaker name panel for mapping IDs to friendly names
+    - Export to TXT, SRT, JSON with speaker names
+    """
 
     transcribe_requested = pyqtSignal(str)  # audio file path
+    transcript_changed = pyqtSignal()       # emitted when text or names change
+    speaker_names_changed = pyqtSignal(dict)  # emitted when speaker names change
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._transcript = None
         self._speaker_colors = {}
+        self._speaker_names = {}
+        self._segment_widgets = []
+        self._audio_path = None
+        self._player = None
+        self._playing_index = -1
         self._setup_ui()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
 
-        # Header
+        # Header row: title + transcribe button
         header = QHBoxLayout()
         title = QLabel("Transcript")
         title.setObjectName("sectionHeader")
@@ -63,13 +78,39 @@ class TranscriptViewer(QWidget):
         self.status_label.hide()
         layout.addWidget(self.status_label)
 
-        # Transcript display
-        self.text_view = QTextEdit()
-        self.text_view.setReadOnly(True)
-        self.text_view.setPlaceholderText(
+        # Speaker name panel
+        from app.ui.speaker_name_panel import SpeakerNamePanel
+        self.speaker_panel = SpeakerNamePanel()
+        self.speaker_panel.names_changed.connect(self._on_speaker_names_changed)
+        layout.addWidget(self.speaker_panel)
+
+        # Scroll area for segment widgets
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setStyleSheet(
+            "QScrollArea { border: 1px solid #313244; border-radius: 6px; "
+            "background-color: #181825; }"
+        )
+
+        self._segments_container = QWidget()
+        self._segments_container.setStyleSheet("background-color: #181825;")
+        self._segments_layout = QVBoxLayout(self._segments_container)
+        self._segments_layout.setContentsMargins(8, 8, 8, 8)
+        self._segments_layout.setSpacing(2)
+        self._segments_layout.addStretch()
+
+        self.scroll_area.setWidget(self._segments_container)
+
+        # Placeholder text
+        self._placeholder = QLabel(
             "Transcript will appear here after recording and transcription..."
         )
-        layout.addWidget(self.text_view)
+        self._placeholder.setStyleSheet("color: #585b70; padding: 20px;")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._segments_layout.insertWidget(0, self._placeholder)
+
+        layout.addWidget(self.scroll_area, 1)
 
         # Export buttons
         export_row = QHBoxLayout()
@@ -92,11 +133,23 @@ class TranscriptViewer(QWidget):
 
         layout.addLayout(export_row)
 
-        self._audio_path = None
+    def _ensure_player(self):
+        """Lazily create the SegmentPlayer."""
+        if self._player is None:
+            from app.audio.segment_player import SegmentPlayer
+            self._player = SegmentPlayer(self)
+            self._player.playback_finished.connect(self._on_playback_finished)
 
     def set_audio_path(self, path):
         self._audio_path = path
         self.transcribe_btn.setEnabled(path is not None)
+        if self._player:
+            self._player.stop()
+            self._player.clear_cache()
+
+    def set_speaker_names(self, names):
+        """Set speaker names from loaded speaker_names.json."""
+        self._speaker_names = dict(names) if names else {}
 
     def _on_transcribe_clicked(self):
         if self._audio_path:
@@ -111,54 +164,125 @@ class TranscriptViewer(QWidget):
         self.progress_bar.hide()
         self.status_label.hide()
 
-    def display_transcript(self, transcript):
-        """Render transcript with speaker colors."""
+    def display_transcript(self, transcript, speaker_names=None):
+        """Render transcript with interactive segment widgets."""
         self._transcript = transcript
-        self.text_view.clear()
+        if speaker_names is not None:
+            self._speaker_names = dict(speaker_names)
+
+        # Stop any playing audio
+        if self._player:
+            self._player.stop()
+        self._playing_index = -1
 
         # Assign colors to speakers
-        speakers = list(set(s.speaker for s in transcript.segments if s.speaker))
+        speakers = sorted(set(s.speaker for s in transcript.segments if s.speaker))
         self._speaker_colors = {}
-        for i, speaker in enumerate(sorted(speakers)):
+        for i, speaker in enumerate(speakers):
             self._speaker_colors[speaker] = SPEAKER_COLORS[i % len(SPEAKER_COLORS)]
 
-        cursor = self.text_view.textCursor()
+        # Clear existing segment widgets
+        self._segment_widgets.clear()
+        while self._segments_layout.count():
+            item = self._segments_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-        for seg in transcript.segments:
-            # Timestamp
-            ts_format = QTextCharFormat()
-            ts_format.setForeground(QColor("#6c7086"))
-            ts_format.setFontFamily("Consolas")
-            ts_format.setFontPointSize(10)
+        # Build segment widgets
+        from app.ui.segment_widget import SegmentWidget
 
-            start_ts = self._format_time(seg.start)
-            end_ts = self._format_time(seg.end)
-            cursor.insertText(f"[{start_ts} -> {end_ts}] ", ts_format)
+        for i, seg in enumerate(transcript.segments):
+            color = self._speaker_colors.get(seg.speaker, "#cdd6f4")
+            name = self._speaker_names.get(seg.speaker, "")
 
-            # Speaker label
-            if seg.speaker:
-                spk_format = QTextCharFormat()
-                color = self._speaker_colors.get(seg.speaker, "#cdd6f4")
-                spk_format.setForeground(QColor(color))
-                spk_format.setFontWeight(QFont.Weight.Bold)
-                cursor.insertText(f"{seg.speaker}: ", spk_format)
+            widget = SegmentWidget(
+                index=i,
+                segment=seg,
+                speaker_color=color,
+                speaker_name=name,
+                parent=self._segments_container,
+            )
+            widget.play_requested.connect(self._on_play_requested)
+            widget.stop_requested.connect(self._on_stop_requested)
+            widget.text_edited.connect(self._on_text_edited)
+            widget.text_reverted.connect(self._on_text_reverted)
+            widget.speaker_clicked.connect(self._on_speaker_label_clicked)
 
-            # Text
-            text_format = QTextCharFormat()
-            text_format.setForeground(QColor("#cdd6f4"))
-            cursor.insertText(f"{seg.text}\n\n", text_format)
+            self._segment_widgets.append(widget)
+            self._segments_layout.addWidget(widget)
 
-        self.text_view.setTextCursor(cursor)
+        self._segments_layout.addStretch()
+
+        # Update speaker panel
+        self.speaker_panel.set_speakers(transcript.segments, self._speaker_names)
 
         # Enable export buttons
         self.export_txt_btn.setEnabled(True)
         self.export_srt_btn.setEnabled(True)
         self.export_json_btn.setEnabled(True)
 
-    def _format_time(self, seconds):
-        m, s = divmod(int(seconds), 60)
-        h, m = divmod(m, 60)
-        return f"{h:02d}:{m:02d}:{s:02d}"
+    def get_speaker_count(self):
+        """Return number of unique speakers in current transcript."""
+        if not self._transcript:
+            return 0
+        return len(set(s.speaker for s in self._transcript.segments if s.speaker))
+
+    # --- Audio playback ---
+
+    def _on_play_requested(self, index):
+        if not self._audio_path:
+            return
+        self._ensure_player()
+
+        # Stop previous
+        if self._playing_index >= 0 and self._playing_index < len(self._segment_widgets):
+            self._segment_widgets[self._playing_index].set_playing(False)
+
+        seg = self._transcript.segments[index]
+        self._player.play_segment(self._audio_path, seg.start, seg.end)
+        self._playing_index = index
+        self._segment_widgets[index].set_playing(True)
+
+    def _on_stop_requested(self):
+        if self._player:
+            self._player.stop()
+        if self._playing_index >= 0 and self._playing_index < len(self._segment_widgets):
+            self._segment_widgets[self._playing_index].set_playing(False)
+        self._playing_index = -1
+
+    def _on_playback_finished(self):
+        if self._playing_index >= 0 and self._playing_index < len(self._segment_widgets):
+            self._segment_widgets[self._playing_index].set_playing(False)
+        self._playing_index = -1
+
+    # --- Text editing ---
+
+    def _on_text_edited(self, index, new_text):
+        seg = self._transcript.segments[index]
+        if not seg.original_text:
+            seg.original_text = seg.text
+        seg.text = new_text
+        self.transcript_changed.emit()
+
+    def _on_text_reverted(self, index):
+        seg = self._transcript.segments[index]
+        if seg.original_text:
+            seg.text = seg.original_text
+            seg.original_text = ""
+        self.transcript_changed.emit()
+
+    # --- Speaker names ---
+
+    def _on_speaker_names_changed(self, names):
+        self._speaker_names = names
+        for widget in self._segment_widgets:
+            widget.update_speaker(names)
+        self.speaker_names_changed.emit(names)
+
+    def _on_speaker_label_clicked(self, speaker_id):
+        self.speaker_panel.focus_speaker(speaker_id)
+
+    # --- Export ---
 
     def _export(self, format_type):
         if not self._transcript:
@@ -177,12 +301,16 @@ class TranscriptViewer(QWidget):
         if not path:
             return
 
+        names = self._speaker_names
+
         if format_type == "txt":
-            content = self._transcript.to_text()
+            content = self._transcript.to_text(speaker_names=names)
         elif format_type == "srt":
-            content = self._transcript.to_srt()
+            content = self._transcript.to_srt(speaker_names=names)
         elif format_type == "json":
-            content = json.dumps(self._transcript.to_dict(), indent=2)
+            content = json.dumps(
+                self._transcript.to_dict(speaker_names=names), indent=2
+            )
 
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
