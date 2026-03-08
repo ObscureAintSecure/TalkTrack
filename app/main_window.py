@@ -152,18 +152,33 @@ class MainWindow(QMainWindow):
 
     def _start_recording(self):
         mic = self.source_selector.get_selected_mic()
+        capture_mode = self.source_selector.get_capture_mode()
+        app_pids = self.source_selector.get_selected_app_pids()
         loopback = self.source_selector.get_selected_loopback()
 
-        if mic is None and loopback is None:
+        # Validate: need at least one audio source
+        if mic is None and loopback is None and not app_pids:
             QMessageBox.warning(
                 self, "No Audio Source",
-                "Please select at least one audio source (microphone or system audio)."
+                "Please select at least one audio source "
+                "(microphone, system audio, or app)."
+            )
+            return
+
+        # Validate: per-app mode needs at least one app checked
+        if capture_mode == "per_app" and not app_pids:
+            QMessageBox.warning(
+                self, "No Apps Selected",
+                "Select at least one app to capture, "
+                "or switch to 'Capture all system audio' mode."
             )
             return
 
         self.recorder.start_recording(
             mic_device=mic,
             loopback_device=loopback,
+            capture_mode=capture_mode,
+            app_pids=app_pids,
         )
         self.notes_panel.set_recording_start(datetime.now())
         self.status_label.setText("Recording...")
