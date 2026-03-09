@@ -35,6 +35,49 @@ def _display_speaker(speaker_id, speaker_names):
     return speaker_id
 
 
+class EditHistory:
+    """Undo/redo stack for segment text edits."""
+
+    def __init__(self, initial_text: str, max_depth: int = 20):
+        self._stack = [initial_text]
+        self._pos = 0
+        self._max_depth = max_depth
+
+    def current(self) -> str:
+        return self._stack[self._pos]
+
+    def original(self) -> str:
+        return self._stack[0]
+
+    def is_modified(self) -> bool:
+        return self._pos > 0
+
+    def can_undo(self) -> bool:
+        return self._pos > 0
+
+    def can_redo(self) -> bool:
+        return self._pos < len(self._stack) - 1
+
+    def push(self, text: str):
+        self._stack = self._stack[:self._pos + 1]
+        self._stack.append(text)
+        self._pos += 1
+        if len(self._stack) > self._max_depth + 1:
+            trim = len(self._stack) - self._max_depth - 1
+            self._stack = self._stack[trim:]
+            self._pos -= trim
+
+    def undo(self) -> str:
+        if self.can_undo():
+            self._pos -= 1
+        return self.current()
+
+    def redo(self) -> str:
+        if self.can_redo():
+            self._pos += 1
+        return self.current()
+
+
 class SegmentWidget(QWidget):
     """A single transcript segment row: [play] [timestamp] [speaker] [text].
 
@@ -60,6 +103,7 @@ class SegmentWidget(QWidget):
         self._speaker_name = speaker_name
         self._editing = False
         self._playing = False
+        self._history = EditHistory(segment.text)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -170,10 +214,11 @@ class SegmentWidget(QWidget):
             return
         self._editing = False
         new_text = self.text_edit.text().strip()
-        if new_text and new_text != self._segment.text:
+        if new_text and new_text != self._history.current():
+            self._history.push(new_text)
             self.text_label.setText(new_text)
             self.text_edited.emit(self._index, new_text)
-            self.edit_indicator.setVisible(True)
+            self.edit_indicator.setVisible(self._history.is_modified())
         self.text_edit.hide()
         self.text_label.show()
 
@@ -185,6 +230,20 @@ class SegmentWidget(QWidget):
         self.text_edit.hide()
         self.text_label.show()
 
+    def undo(self):
+        if self._history.can_undo():
+            text = self._history.undo()
+            self.text_label.setText(text)
+            self.edit_indicator.setVisible(self._history.is_modified())
+            self.text_edited.emit(self._index, text)
+
+    def redo(self):
+        if self._history.can_redo():
+            text = self._history.redo()
+            self.text_label.setText(text)
+            self.edit_indicator.setVisible(self._history.is_modified())
+            self.text_edited.emit(self._index, text)
+
     def _show_context_menu(self, pos):
         menu = QMenu(self)
 
@@ -192,15 +251,27 @@ class SegmentWidget(QWidget):
         edit_action.triggered.connect(self._start_edit)
         menu.addAction(edit_action)
 
-        if self._segment.original_text:
+        if self._history.can_undo():
+            undo_action = QAction("Undo", self)
+            undo_action.triggered.connect(self.undo)
+            menu.addAction(undo_action)
+
+        if self._history.can_redo():
+            redo_action = QAction("Redo", self)
+            redo_action.triggered.connect(self.redo)
+            menu.addAction(redo_action)
+
+        if self._history.is_modified():
             revert_action = QAction("Revert to Original", self)
-            revert_action.triggered.connect(lambda: self._revert())
+            revert_action.triggered.connect(self._revert_to_original)
             menu.addAction(revert_action)
 
         menu.exec(self.text_label.mapToGlobal(pos))
 
-    def _revert(self):
-        self.text_label.setText(self._segment.original_text)
+    def _revert_to_original(self):
+        original = self._history.original()
+        self._history = EditHistory(original)
+        self.text_label.setText(original)
         self.edit_indicator.setVisible(False)
         self.text_reverted.emit(self._index)
 
