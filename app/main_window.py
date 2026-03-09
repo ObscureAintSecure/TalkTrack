@@ -22,6 +22,7 @@ from app.ui.recordings_list import RecordingsList
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.status_panel import SystemStatusDialog
 from app.ui.recording_header import RecordingHeader
+from app.ui.level_meter import LevelMeter
 
 
 class MainWindow(QMainWindow):
@@ -100,6 +101,10 @@ class MainWindow(QMainWindow):
         self.source_selector = SourceSelector()
         left_layout.addWidget(self.source_selector)
 
+        # Level meter
+        self.level_meter = LevelMeter()
+        left_layout.addWidget(self.level_meter)
+
         # Recording controls
         self.recording_controls = RecordingControls()
         left_layout.addWidget(self.recording_controls)
@@ -153,6 +158,8 @@ class MainWindow(QMainWindow):
         self.recorder.time_updated.connect(self.recording_controls.update_time)
         self.recorder.recording_finished.connect(self._on_recording_finished)
         self.recorder.error_occurred.connect(self._on_error)
+        self.recorder.mic_level.connect(self.level_meter.update_mic_level)
+        self.recorder.system_level.connect(self.level_meter.update_system_level)
 
         # Transcript
         self.transcript_viewer.transcribe_requested.connect(self._start_transcription)
@@ -218,6 +225,7 @@ class MainWindow(QMainWindow):
 
         if state == RecordingState.IDLE:
             self.recording_controls.reset_timer()
+            self.level_meter.reset()
 
     def _on_recording_finished(self, session):
         self._current_session = session

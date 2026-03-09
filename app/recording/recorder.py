@@ -26,6 +26,8 @@ class Recorder(QObject):
     time_updated = pyqtSignal(float)
     recording_finished = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
+    mic_level = pyqtSignal(object)
+    system_level = pyqtSignal(object)
 
     def __init__(self, config):
         super().__init__()
@@ -72,6 +74,10 @@ class Recorder(QObject):
             sample_rate=sample_rate,
             capture_mode=capture_mode,
             app_pids=app_pids,
+        )
+        self._capture.set_level_callbacks(
+            mic_callback=lambda chunk: self.mic_level.emit(chunk),
+            system_callback=lambda chunk: self.system_level.emit(chunk),
         )
 
         try:
