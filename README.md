@@ -10,7 +10,7 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 ![License](https://img.shields.io/badge/License-MIT-green)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee)](https://buymeacoffee.com/obscureaintsecure)
 
-![TalkTrack screenshot](resources/screenshot.jpg)
+![TalkTrack screenshot](resources/screenshot.jpg?v=2)
 
 ## Why TalkTrack?
 
