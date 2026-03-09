@@ -1,5 +1,6 @@
 import json
 import sys
+import webbrowser
 from pathlib import Path
 from datetime import datetime
 
@@ -24,6 +25,7 @@ from app.ui.status_panel import SystemStatusDialog
 from app.ui.recording_header import RecordingHeader
 from app.ui.level_meter import LevelMeter
 from app.ui.waveform_display import WaveformDisplay
+from app.ui.about_dialog import AboutDialog, BMAC_URL
 
 
 class MainWindow(QMainWindow):
@@ -78,6 +80,12 @@ class MainWindow(QMainWindow):
         diarization_setup_action = QAction("&Diarization Setup...", self)
         diarization_setup_action.triggered.connect(self._show_diarization_setup)
         help_menu.addAction(diarization_setup_action)
+
+        help_menu.addSeparator()
+
+        support_action = QAction("Support TalkTrack", self)
+        support_action.triggered.connect(lambda: webbrowser.open(BMAC_URL))
+        help_menu.addAction(support_action)
 
         help_menu.addSeparator()
 
@@ -523,19 +531,8 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(300, self._show_diarization_setup)
 
     def _show_about(self):
-        QMessageBox.about(
-            self,
-            "About TalkTrack",
-            "TalkTrack - Call Recorder & Transcriber\n\n"
-            "Records system audio and microphone from any\n"
-            "video call application (Teams, Zoom, etc.)\n\n"
-            "Features:\n"
-            "- Dual audio capture (mic + system audio)\n"
-            "- AI-powered transcription (Whisper)\n"
-            "- Speaker diarization (pyannote.audio)\n"
-            "- Export to TXT, SRT, JSON\n"
-            "- Call notes with timestamps"
-        )
+        dialog = AboutDialog(self)
+        dialog.exec()
 
     def closeEvent(self, event):
         if self.recorder.state != RecordingState.IDLE:
