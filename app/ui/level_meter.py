@@ -96,33 +96,25 @@ class LevelMeter(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 4)
-        layout.setSpacing(2)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(8)
 
         # Mic meter
-        mic_row = QHBoxLayout()
-        mic_row.setSpacing(4)
         mic_label = QLabel("Mic")
-        mic_label.setFixedWidth(45)
         mic_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
         mic_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._mic_bar = LevelBar()
-        mic_row.addWidget(mic_label)
-        mic_row.addWidget(self._mic_bar)
-        layout.addLayout(mic_row)
+        layout.addWidget(mic_label)
+        layout.addWidget(self._mic_bar, 1)
 
         # System meter
-        sys_row = QHBoxLayout()
-        sys_row.setSpacing(4)
-        sys_label = QLabel("System")
-        sys_label.setFixedWidth(45)
+        sys_label = QLabel("Sys")
         sys_label.setStyleSheet("color: #a6adc8; font-size: 11px;")
         sys_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._sys_bar = LevelBar()
-        sys_row.addWidget(sys_label)
-        sys_row.addWidget(self._sys_bar)
-        layout.addLayout(sys_row)
+        layout.addWidget(sys_label)
+        layout.addWidget(self._sys_bar, 1)
 
     def update_mic_level(self, audio_chunk: np.ndarray):
         db = compute_rms_db(audio_chunk)

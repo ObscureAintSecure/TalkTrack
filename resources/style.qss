@@ -67,10 +67,10 @@ QPushButton#recordButton {
     background-color: #f38ba8;
     color: #1e1e2e;
     font-weight: bold;
-    font-size: 14px;
     border: none;
-    min-width: 100px;
-    min-height: 36px;
+    border-radius: 14px;
+    padding: 4px 14px;
+    min-height: 28px;
 }
 
 QPushButton#recordButton:hover {
@@ -87,11 +87,18 @@ QPushButton#stopButton {
     color: #1e1e2e;
     font-weight: bold;
     border: none;
-    min-width: 80px;
+    border-radius: 14px;
+    padding: 4px 14px;
+    min-height: 28px;
 }
 
 QPushButton#stopButton:hover {
     background-color: #bac2de;
+}
+
+QPushButton#stopButton:disabled {
+    background-color: #45475a;
+    color: #585b70;
 }
 
 QPushButton#pauseButton {
@@ -99,11 +106,18 @@ QPushButton#pauseButton {
     color: #1e1e2e;
     font-weight: bold;
     border: none;
-    min-width: 80px;
+    border-radius: 14px;
+    padding: 4px 14px;
+    min-height: 28px;
 }
 
 QPushButton#pauseButton:hover {
     background-color: #f9e2af;
+}
+
+QPushButton#pauseButton:disabled {
+    background-color: #45475a;
+    color: #585b70;
 }
 
 /* Combo boxes */
@@ -145,7 +159,7 @@ QLabel {
 }
 
 QLabel#timerLabel {
-    font-size: 28px;
+    font-size: 16px;
     font-weight: bold;
     color: #cdd6f4;
     font-family: "Consolas", "Courier New", monospace;
@@ -184,9 +198,9 @@ QListWidget {
 }
 
 QListWidget::item {
-    padding: 8px;
+    padding: 4px 8px;
     border-radius: 4px;
-    margin: 2px;
+    margin: 1px 2px;
 }
 
 QListWidget::item:selected {

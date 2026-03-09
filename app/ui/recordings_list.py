@@ -32,17 +32,9 @@ class RecordingsList(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Header
-        header = QHBoxLayout()
         title = QLabel("Recordings")
         title.setObjectName("sectionHeader")
-        header.addWidget(title)
-        header.addStretch()
-
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.refresh)
-        header.addWidget(self.refresh_btn)
-
-        layout.addLayout(header)
+        layout.addWidget(title)
 
         # Search bar
         self.search_bar = SearchBar()
@@ -52,10 +44,11 @@ class RecordingsList(QWidget):
 
         # List
         self.list_widget = QListWidget()
+        self.list_widget.setMinimumHeight(100)
         self.list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
-        layout.addWidget(self.list_widget)
+        layout.addWidget(self.list_widget, 1)
 
     def refresh(self):
         self.list_widget.clear()

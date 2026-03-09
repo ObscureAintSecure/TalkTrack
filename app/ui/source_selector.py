@@ -1,8 +1,8 @@
 """Audio source selection widget with per-app capture support."""
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel,
-    QPushButton, QGroupBox, QListWidget, QListWidgetItem,
-    QRadioButton, QButtonGroup, QCheckBox
+    QPushButton, QListWidget, QListWidgetItem,
+    QRadioButton, QButtonGroup, QCheckBox, QToolButton, QFrame
 )
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 
@@ -13,6 +13,51 @@ from app.utils.audio_devices import (
 from app.utils.platform_info import is_windows_11
 
 
+class CollapsibleSection(QWidget):
+    """A section with a clickable header that toggles content visibility."""
+
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header button
+        self._toggle_btn = QToolButton()
+        self._toggle_btn.setObjectName("collapsibleToggle")
+        self._toggle_btn.setText(f"\u25b8  {title}")
+        self._toggle_btn.setCheckable(True)
+        self._toggle_btn.setChecked(False)
+        self._toggle_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._toggle_btn.toggled.connect(self._on_toggled)
+        self._toggle_btn.setStyleSheet(
+            "QToolButton { border: none; color: #89b4fa; font-weight: bold; "
+            "text-align: left; padding: 4px 0; }"
+            "QToolButton:hover { color: #b4befe; }"
+        )
+        layout.addWidget(self._toggle_btn)
+
+        # Content area
+        self._content = QWidget()
+        self._content.setVisible(False)
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 4, 0, 0)
+        layout.addWidget(self._content, 1)
+
+        self._title = title
+
+    def content_layout(self):
+        return self._content_layout
+
+    def _on_toggled(self, checked):
+        self._content.setVisible(checked)
+        arrow = "\u25be" if checked else "\u25b8"
+        self._toggle_btn.setText(f"{arrow}  {self._title}")
+
+    def set_expanded(self, expanded):
+        self._toggle_btn.setChecked(expanded)
+
+
 class SourceSelector(QWidget):
     """Widget for selecting audio input sources.
 
@@ -21,6 +66,8 @@ class SourceSelector(QWidget):
     """
 
     devices_changed = pyqtSignal()
+    # Emitted when all checked apps go inactive during recording
+    apps_went_inactive = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -28,6 +75,7 @@ class SourceSelector(QWidget):
         self._loopback_devices = []
         self._win11 = is_windows_11()
         self._auto_refresh_timer = None
+        self._had_active_apps = False
         self._setup_ui()
         self.refresh_devices()
 
@@ -38,58 +86,65 @@ class SourceSelector(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        group = QGroupBox("Audio Sources")
-        group_layout = QVBoxLayout(group)
+        # Collapsible audio sources section
+        self._section = CollapsibleSection("Audio Sources")
+        content = self._section.content_layout()
 
-        # --- Microphone selector (unchanged) ---
+        # Microphone selector
         mic_row = QHBoxLayout()
         mic_label = QLabel("Microphone:")
-        mic_label.setFixedWidth(120)
+        mic_label.setFixedWidth(80)
         mic_row.addWidget(mic_label)
 
         self.mic_combo = QComboBox()
-        self.mic_combo.setMinimumWidth(250)
         mic_row.addWidget(self.mic_combo, 1)
-        group_layout.addLayout(mic_row)
+        content.addLayout(mic_row)
 
-        # --- System audio section ---
+        # System audio section
         if self._win11:
-            self._setup_per_app_ui(group_layout)
+            self._setup_per_app_ui(content)
         else:
-            self._setup_legacy_ui(group_layout)
+            self._setup_legacy_ui(content)
 
-        # Refresh button
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
+        # Bottom row: auto-refresh + refresh devices
+        bottom_row = QHBoxLayout()
+        if self._win11:
+            self.auto_refresh_check = QCheckBox("Auto-refresh")
+            self.auto_refresh_check.setChecked(True)
+            self.auto_refresh_check.toggled.connect(self._on_auto_refresh_toggled)
+            bottom_row.addWidget(self.auto_refresh_check)
+
+        bottom_row.addStretch()
         self.refresh_btn = QPushButton("Refresh Devices")
         self.refresh_btn.clicked.connect(self.refresh_devices)
-        btn_row.addWidget(self.refresh_btn)
-        group_layout.addLayout(btn_row)
+        bottom_row.addWidget(self.refresh_btn)
+        content.addLayout(bottom_row)
 
-        layout.addWidget(group)
+        layout.addWidget(self._section, 1)
+
+        # Start expanded by default
+        self._section.set_expanded(True)
 
     def _setup_legacy_ui(self, parent_layout):
         """Original system audio dropdown (Win10 or fallback)."""
         sys_row = QHBoxLayout()
         sys_label = QLabel("System Audio:")
-        sys_label.setFixedWidth(120)
+        sys_label.setFixedWidth(80)
         sys_row.addWidget(sys_label)
 
         self.loopback_combo = QComboBox()
-        self.loopback_combo.setMinimumWidth(250)
         sys_row.addWidget(self.loopback_combo, 1)
         parent_layout.addLayout(sys_row)
 
-        # Not used in legacy mode
         self.app_list = None
         self.mode_group = None
 
     def _setup_per_app_ui(self, parent_layout):
         """Per-app audio picker (Win11)."""
         self.mode_group = QButtonGroup(self)
-        self.radio_per_app = QRadioButton("Capture selected apps only")
+        self.radio_per_app = QRadioButton("Capture selected apps")
         self.radio_per_app.setObjectName("captureMode")
-        self.radio_legacy = QRadioButton("Capture all system audio (legacy)")
+        self.radio_legacy = QRadioButton("Capture all system audio")
         self.radio_legacy.setObjectName("captureMode")
         self.mode_group.addButton(self.radio_per_app, 0)
         self.mode_group.addButton(self.radio_legacy, 1)
@@ -99,32 +154,17 @@ class SourceSelector(QWidget):
         parent_layout.addWidget(self.radio_per_app)
 
         # App list (checkable)
-        app_label = QLabel("App Audio:")
-        app_label.setObjectName("sectionHeader")
-        parent_layout.addWidget(app_label)
-
         self.app_list = QListWidget()
         self.app_list.setObjectName("appAudioList")
         self.app_list.setMinimumHeight(100)
-        self.app_list.setMaximumHeight(180)
-        parent_layout.addWidget(self.app_list)
+        parent_layout.addWidget(self.app_list, 1)
 
         parent_layout.addWidget(self.radio_legacy)
 
-        # Also keep the legacy combo hidden for fallback
+        # Hidden legacy combo for fallback
         self.loopback_combo = QComboBox()
-        self.loopback_combo.setMinimumWidth(250)
         self.loopback_combo.setVisible(False)
         parent_layout.addWidget(self.loopback_combo)
-
-        # Auto-refresh checkbox
-        refresh_row = QHBoxLayout()
-        self.auto_refresh_check = QCheckBox("Auto-refresh")
-        self.auto_refresh_check.setChecked(True)
-        self.auto_refresh_check.toggled.connect(self._on_auto_refresh_toggled)
-        refresh_row.addStretch()
-        refresh_row.addWidget(self.auto_refresh_check)
-        parent_layout.addLayout(refresh_row)
 
     def _on_mode_changed(self, button_id, checked):
         if not checked:
@@ -171,18 +211,21 @@ class SourceSelector(QWidget):
 
         self.app_list.clear()
 
+        # Track whether any checked apps are still active
+        any_checked_active = False
+
         for app in apps:
-            # Show app name with status indicator
             if app.get("active", False):
                 label = f"{app['name']}  ({len(app['pids'])} process{'es' if len(app['pids']) > 1 else ''})"
             else:
                 label = f"{app['name']}  (not in call)"
             item = QListWidgetItem(label)
-            # Store list of PIDs for this app
             item.setData(Qt.ItemDataRole.UserRole, app["pids"])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             if app["name"] in checked_names:
                 item.setCheckState(Qt.CheckState.Checked)
+                if app.get("active", False):
+                    any_checked_active = True
             else:
                 item.setCheckState(Qt.CheckState.Unchecked)
             self.app_list.addItem(item)
@@ -191,6 +234,11 @@ class SourceSelector(QWidget):
             item = QListWidgetItem("No audio apps detected")
             item.setFlags(Qt.ItemFlag.NoItemFlags)
             self.app_list.addItem(item)
+
+        # Detect transition: checked apps were active, now all inactive
+        if checked_names and self._had_active_apps and not any_checked_active:
+            self.apps_went_inactive.emit()
+        self._had_active_apps = any_checked_active
 
     def refresh_devices(self):
         self.mic_combo.clear()

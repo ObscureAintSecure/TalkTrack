@@ -23,7 +23,6 @@ from app.ui.recordings_list import RecordingsList
 from app.ui.settings_dialog import SettingsDialog
 from app.ui.status_panel import SystemStatusDialog
 from app.ui.recording_header import RecordingHeader
-from app.ui.level_meter import LevelMeter
 from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
 from app.ui.summary_panel import SummaryPanel
@@ -42,8 +41,8 @@ class MainWindow(QMainWindow):
         self._diarization_worker = None
 
         self.setWindowTitle("TalkTrack - Call Recorder & Transcriber")
-        self.setMinimumSize(900, 650)
-        self.resize(1050, 700)
+        self.setMinimumSize(1000, 700)
+        self.resize(1260, 800)
 
         self._setup_menu()
         self._setup_ui()
@@ -105,18 +104,15 @@ class MainWindow(QMainWindow):
         # Main splitter: left (controls) | right (tabs)
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left panel: recording controls + source selector
+        # Left panel: controls at top, sources collapsible, recordings below
         left_panel = QWidget()
+        left_panel.setMaximumWidth(385)
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(8, 8, 8, 8)
 
-        # Source selector
-        self.source_selector = SourceSelector()
-        left_layout.addWidget(self.source_selector)
-
-        # Level meter
-        self.level_meter = LevelMeter()
-        left_layout.addWidget(self.level_meter)
+        # Recording controls (buttons row + timer/meters row)
+        self.recording_controls = RecordingControls()
+        left_layout.addWidget(self.recording_controls)
 
         # Waveform display (hidden until recording starts)
         self.waveform = WaveformDisplay(
@@ -125,9 +121,9 @@ class MainWindow(QMainWindow):
         )
         left_layout.addWidget(self.waveform)
 
-        # Recording controls
-        self.recording_controls = RecordingControls()
-        left_layout.addWidget(self.recording_controls)
+        # Audio sources (collapsible)
+        self.source_selector = SourceSelector()
+        left_layout.addWidget(self.source_selector, 1)
 
         # Recordings list
         recordings_dir = self.config.get("output", "directory")
@@ -170,7 +166,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.tabs)
         splitter.addWidget(right_panel)
 
-        splitter.setSizes([400, 600])
+        splitter.setSizes([275, 960])
         main_layout.addWidget(splitter)
 
     def _setup_statusbar(self):
@@ -190,9 +186,9 @@ class MainWindow(QMainWindow):
         self.recorder.time_updated.connect(self.recording_controls.update_time)
         self.recorder.recording_finished.connect(self._on_recording_finished)
         self.recorder.error_occurred.connect(self._on_error)
-        self.recorder.mic_level.connect(self.level_meter.update_mic_level)
+        self.recorder.mic_level.connect(self.recording_controls.update_mic_level)
         self.recorder.mic_level.connect(self.waveform.append_audio)
-        self.recorder.system_level.connect(self.level_meter.update_system_level)
+        self.recorder.system_level.connect(self.recording_controls.update_system_level)
 
         # Transcript
         self.transcript_viewer.transcribe_requested.connect(self._start_transcription)
@@ -200,6 +196,9 @@ class MainWindow(QMainWindow):
         # Recordings list
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
         self.recordings_list.search_result_selected.connect(self._on_search_result_selected)
+
+        # Auto-stop when call ends
+        self.source_selector.apps_went_inactive.connect(self._on_apps_went_inactive)
 
         # Recording header
         self.recording_header.name_changed.connect(self._on_recording_renamed)
@@ -258,6 +257,13 @@ class MainWindow(QMainWindow):
         self.recorder.stop_recording()
         self.status_label.setText("Stopping...")
 
+    def _on_apps_went_inactive(self):
+        """Auto-stop recording when all selected apps leave their call."""
+        if self.recorder.state in (RecordingState.RECORDING, RecordingState.PAUSED):
+            if self.source_selector.is_per_app_mode():
+                self.status_label.setText("Call ended — stopping recording...")
+                self.recorder.stop_recording()
+
     def _on_state_changed(self, state):
         self.recording_controls.set_state(state)
         self.source_selector.set_enabled(state == RecordingState.IDLE)
@@ -272,7 +278,7 @@ class MainWindow(QMainWindow):
         elif state == RecordingState.IDLE:
             self.waveform.stop()
             self.recording_controls.reset_timer()
-            self.level_meter.reset()
+            self.recording_controls.reset_levels()
 
     def _on_recording_finished(self, session):
         self._current_session = session
