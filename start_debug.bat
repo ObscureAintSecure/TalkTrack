@@ -1,8 +1,8 @@
 @echo off
 cd /d "%~dp0"
 
-:: Check if dependencies are installed
-python -c "import PyQt6" 2>nul
+:: Check if dependencies are installed (quick check of key packages)
+python -c "import PyQt6; import sounddevice; import numpy" 2>nul
 if errorlevel 1 (
     echo ============================================
     echo   TalkTrack - First Time Setup
@@ -30,6 +30,9 @@ if errorlevel 1 (
     echo.
     echo Dependencies installed successfully. Launching TalkTrack...
     echo.
+) else (
+    :: Ensure all deps are up to date silently
+    pip install -r requirements.txt --quiet >nul 2>&1
 )
 
 python main.py
