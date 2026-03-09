@@ -612,13 +612,13 @@ class MainWindow(QMainWindow):
         wizard.exec()
 
     def _check_startup_status(self):
-        if SystemStatusDialog.should_show_on_startup(self.config):
-            self._show_system_status()
-
-        # Auto-show diarization setup wizard if no HF token configured
+        # Show diarization setup wizard first if no HF token configured
         hf_token = self.config.get("diarization", "hf_token")
         if not hf_token:
-            QTimer.singleShot(300, self._show_diarization_setup)
+            self._show_diarization_setup()
+
+        if SystemStatusDialog.should_show_on_startup(self.config):
+            QTimer.singleShot(300, self._show_system_status)
 
     def _open_log_file(self):
         import os
