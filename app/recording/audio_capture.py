@@ -10,11 +10,13 @@ from pathlib import Path
 class AudioStream:
     """Captures audio from a single device (mic or loopback)."""
 
-    def __init__(self, device_index, sample_rate=16000, channels=1, is_loopback=False):
+    def __init__(self, device_index, sample_rate=16000, channels=1, is_loopback=False,
+                 level_callback=None):
         self.device_index = device_index
         self.sample_rate = sample_rate
         self.channels = channels
         self.is_loopback = is_loopback
+        self._level_callback = level_callback
         self._stream = None
         self._buffer = queue.Queue()
         self._recording = False
@@ -25,8 +27,11 @@ class AudioStream:
         if status:
             print(f"Audio stream status: {status}")
         if self._recording and not self._paused:
-            self._buffer.put(indata.copy())
-            self._all_chunks.append(indata.copy())
+            chunk = indata.copy()
+            self._buffer.put(chunk)
+            self._all_chunks.append(chunk)
+            if self._level_callback is not None:
+                self._level_callback(chunk)
 
     def start(self):
         self._recording = True
@@ -98,6 +103,13 @@ class DualAudioCapture:
         self._elapsed = 0
         self.capture_mode = capture_mode
         self.app_pids = app_pids or []
+        self._mic_level_callback = None
+        self._system_level_callback = None
+
+    def set_level_callbacks(self, mic_callback, system_callback):
+        """Set callbacks to receive audio level data from each channel."""
+        self._mic_level_callback = mic_callback
+        self._system_level_callback = system_callback
 
     def start(self, output_dir):
         """Start recording both mic and system audio."""
@@ -110,6 +122,7 @@ class DualAudioCapture:
                 sample_rate=self.sample_rate,
                 channels=1,
                 is_loopback=False,
+                level_callback=self._mic_level_callback,
             )
             self.mic_stream.start()
 
@@ -126,6 +139,7 @@ class DualAudioCapture:
                 sample_rate=self.sample_rate,
                 channels=1,
                 is_loopback=True,
+                level_callback=self._system_level_callback,
             )
             try:
                 self.loopback_stream.start()
@@ -135,6 +149,7 @@ class DualAudioCapture:
                     sample_rate=self.sample_rate,
                     channels=2,
                     is_loopback=True,
+                    level_callback=self._system_level_callback,
                 )
                 self.loopback_stream.start()
 

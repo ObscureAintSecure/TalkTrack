@@ -7,8 +7,10 @@ from PyQt6.QtWidgets import (
     QLabel, QProgressBar, QFileDialog, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QShortcut, QKeySequence
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
+from app.ui.transcript_search_bar import TranscriptSearchBar
 
 
 # Speaker colors for visual distinction — shared constant
@@ -83,6 +85,16 @@ class TranscriptViewer(QWidget):
         self.speaker_panel = SpeakerNamePanel()
         self.speaker_panel.names_changed.connect(self._on_speaker_names_changed)
         layout.addWidget(self.speaker_panel)
+
+        # Find/replace bar
+        self.search_bar = TranscriptSearchBar()
+        self.search_bar.navigate_to_match.connect(self._highlight_match)
+        self.search_bar.replace_requested.connect(self._replace_match)
+        layout.addWidget(self.search_bar)
+
+        # Ctrl+F shortcut
+        find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        find_shortcut.activated.connect(self._show_search)
 
         # Scroll area for segment widgets
         self.scroll_area = QScrollArea()
@@ -281,6 +293,33 @@ class TranscriptViewer(QWidget):
 
     def _on_speaker_label_clicked(self, speaker_id):
         self.speaker_panel.focus_speaker(speaker_id)
+
+    # --- Find/replace ---
+
+    def _show_search(self):
+        texts = [seg.text for seg in self._transcript.segments] if self._transcript else []
+        self.search_bar.set_texts(texts)
+        self.search_bar.show_bar()
+
+    def _highlight_match(self, seg_idx, start, end):
+        if 0 <= seg_idx < len(self._segment_widgets):
+            widget = self._segment_widgets[seg_idx]
+            self.scroll_area.ensureWidgetVisible(widget)
+            widget.highlight_match(start, end)
+
+    def _replace_match(self, seg_idx, new_text, start, end):
+        if 0 <= seg_idx < len(self._segment_widgets):
+            seg = self._transcript.segments[seg_idx]
+            updated = seg.text[:start] + new_text + seg.text[end:]
+            self._segment_widgets[seg_idx]._history.push(updated)
+            self._segment_widgets[seg_idx].text_label.setText(updated)
+            self._segment_widgets[seg_idx].edit_indicator.setVisible(
+                self._segment_widgets[seg_idx]._history.is_modified()
+            )
+            seg.text = updated
+            self.transcript_changed.emit()
+            texts = [s.text for s in self._transcript.segments]
+            self.search_bar.set_texts(texts)
 
     # --- Export ---
 

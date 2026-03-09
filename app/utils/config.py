@@ -27,6 +27,14 @@ DEFAULT_CONFIG = {
         "min_speakers": None,
         "max_speakers": None,
     },
+    "ai": {
+        "provider": "none",
+        "api_key": "",
+        "model": "",
+        "local_model_path": "",
+        "embed_model": "all-MiniLM-L6-v2",
+        "auto_summarize": True,
+    },
     "ui": {
         "theme": "dark",
     },

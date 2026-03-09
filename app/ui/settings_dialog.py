@@ -138,6 +138,57 @@ class SettingsDialog(QDialog):
 
         tabs.addTab(transcription_tab, "Transcription")
 
+        # AI Assistant Tab
+        ai_tab = QWidget()
+        ai_layout = QVBoxLayout(ai_tab)
+
+        ai_group = QGroupBox("AI Provider")
+        ai_form = QFormLayout(ai_group)
+
+        self.ai_provider_combo = QComboBox()
+        self.ai_provider_combo.addItem("None (disabled)", "none")
+        self.ai_provider_combo.addItem("Claude (Anthropic)", "claude")
+        self.ai_provider_combo.addItem("OpenAI", "openai")
+        self.ai_provider_combo.addItem("Local Model", "local")
+        self.ai_provider_combo.currentIndexChanged.connect(self._on_ai_provider_changed)
+        ai_form.addRow("Provider:", self.ai_provider_combo)
+
+        self.ai_api_key_label = QLabel("API Key:")
+        self.ai_api_key = QLineEdit()
+        self.ai_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ai_api_key.setPlaceholderText("Enter API key...")
+        ai_form.addRow(self.ai_api_key_label, self.ai_api_key)
+
+        self.ai_model = QComboBox()
+        self.ai_model.setEditable(True)
+        ai_form.addRow("Model:", self.ai_model)
+
+        self.ai_local_label = QLabel("Local Model:")
+        self.ai_local_path = QLineEdit()
+        self.ai_local_path.setPlaceholderText("Path to GGUF model file...")
+        self.ai_local_browse = QPushButton("Browse...")
+        self.ai_local_browse.clicked.connect(self._browse_local_model)
+        local_row = QHBoxLayout()
+        local_row.addWidget(self.ai_local_path)
+        local_row.addWidget(self.ai_local_browse)
+        ai_form.addRow(self.ai_local_label, local_row)
+
+        self.ai_test_btn = QPushButton("Test Connection")
+        self.ai_test_btn.clicked.connect(self._test_ai_connection)
+        ai_form.addRow("", self.ai_test_btn)
+
+        ai_layout.addWidget(ai_group)
+
+        # Auto features group
+        features_group = QGroupBox("Automatic Features")
+        features_form = QFormLayout(features_group)
+        self.auto_summarize_cb = QCheckBox("Generate summary after transcription")
+        features_form.addRow(self.auto_summarize_cb)
+        ai_layout.addWidget(features_group)
+
+        ai_layout.addStretch()
+        tabs.addTab(ai_tab, "AI Assistant")
+
         layout.addWidget(tabs)
 
         # OK / Cancel buttons
@@ -199,6 +250,16 @@ class SettingsDialog(QDialog):
         max_spk = self.config.get("diarization", "max_speakers")
         self.max_speakers_spin.setValue(max_spk if max_spk else 0)
 
+        # AI
+        provider = self.config.get("ai", "provider")
+        idx = self.ai_provider_combo.findData(provider)
+        if idx >= 0:
+            self.ai_provider_combo.setCurrentIndex(idx)
+        self.ai_api_key.setText(self.config.get("ai", "api_key"))
+        self.ai_local_path.setText(self.config.get("ai", "local_model_path"))
+        self.auto_summarize_cb.setChecked(self.config.get("ai", "auto_summarize"))
+        self._on_ai_provider_changed(self.ai_provider_combo.currentIndex())
+
     def _save_and_close(self):
         self.config.set("audio", "sample_rate", self.sample_rate_combo.currentData())
         self.config.set("audio", "channels", self.channels_combo.currentData())
@@ -219,6 +280,13 @@ class SettingsDialog(QDialog):
         max_spk = self.max_speakers_spin.value()
         self.config.set("diarization", "max_speakers", max_spk if max_spk > 0 else None)
 
+        # AI
+        self.config.set("ai", "provider", self.ai_provider_combo.currentData())
+        self.config.set("ai", "api_key", self.ai_api_key.text())
+        self.config.set("ai", "model", self.ai_model.currentText())
+        self.config.set("ai", "local_model_path", self.ai_local_path.text())
+        self.config.set("ai", "auto_summarize", self.auto_summarize_cb.isChecked())
+
         self.config.save()
         self.accept()
 
@@ -229,6 +297,55 @@ class SettingsDialog(QDialog):
             # Reload diarization settings after wizard saves
             self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
             self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
+
+    def _on_ai_provider_changed(self, index):
+        provider = self.ai_provider_combo.currentData()
+        is_api = provider in ("claude", "openai")
+        is_local = provider == "local"
+        self.ai_api_key.setVisible(is_api)
+        self.ai_api_key_label.setVisible(is_api)
+        self.ai_local_path.setVisible(is_local)
+        self.ai_local_browse.setVisible(is_local)
+        self.ai_local_label.setVisible(is_local)
+        self.ai_model.clear()
+        if provider == "claude":
+            self.ai_model.addItems(["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-6"])
+        elif provider == "openai":
+            self.ai_model.addItems(["gpt-4o", "gpt-4o-mini", "gpt-4.1"])
+        elif provider == "local":
+            self.ai_model.addItem("(set path below)")
+
+    def _browse_local_model(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Model File", "", "GGUF Files (*.gguf);;All Files (*)"
+        )
+        if path:
+            self.ai_local_path.setText(path)
+
+    def _test_ai_connection(self):
+        from PyQt6.QtWidgets import QMessageBox
+        try:
+            from app.ai.provider_factory import create_provider
+        except ImportError:
+            QMessageBox.warning(self, "AI", "AI provider module not yet available.")
+            return
+        config = {
+            "provider": self.ai_provider_combo.currentData(),
+            "api_key": self.ai_api_key.text(),
+            "model": self.ai_model.currentText(),
+            "local_model_path": self.ai_local_path.text(),
+        }
+        try:
+            provider = create_provider(config)
+            if provider is None:
+                QMessageBox.information(self, "AI", "No provider selected.")
+                return
+            if provider.test_connection():
+                QMessageBox.information(self, "AI", "Connection successful!")
+            else:
+                QMessageBox.warning(self, "AI", "Connection failed.")
+        except Exception as e:
+            QMessageBox.critical(self, "AI Error", str(e))
 
     def _browse_output_dir(self):
         directory = QFileDialog.getExistingDirectory(
