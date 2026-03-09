@@ -14,3 +14,8 @@ comtypes>=1.2.0
 psutil>=5.9.0
 transformers>=4.45.0
 sentence-transformers>=3.0.0
+
+# AI Providers (optional - install based on your preferred provider)
+anthropic>=0.40.0
+openai>=1.50.0
+# llama-cpp-python>=0.3.0  # Uncomment for local model support

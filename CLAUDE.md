@@ -35,6 +35,16 @@ TalkTrack/
     transcription/
       transcriber.py                   # Whisper worker + dataclasses
       diarizer.py                      # Speaker diarization (pyannote)
+    ai/
+      __init__.py                      # Package init
+      provider.py                      # AIProvider base class
+      claude_provider.py               # Claude API implementation
+      openai_provider.py               # OpenAI API implementation
+      local_provider.py                # Local model (llama-cpp-python)
+      provider_factory.py              # Factory for configured provider
+      summarizer.py                    # Meeting summary + action items
+      search_index.py                  # Transcript search + embeddings
+      chat.py                          # Chat context builder
     ui/
       source_selector.py              # Mic dropdown + per-app picker (Win11) or legacy loopback (Win10)
       recording_controls.py           # Record/Pause/Stop buttons + timer
@@ -46,6 +56,14 @@ TalkTrack/
       transcript_viewer.py            # Display + export transcripts (with interactive segments)
       notes_panel.py                  # Call notes with timestamps
       recordings_list.py              # Past recordings browser
+      level_meter.py                   # Real-time audio level meters
+      waveform_display.py             # Live waveform visualization
+      transcript_search_bar.py        # Find/replace for transcripts
+      search_bar.py                    # Recordings search bar
+      summary_panel.py                 # AI meeting summary display
+      action_items_panel.py            # AI action items display
+      chat_panel.py                    # Chat with transcript panel
+      about_dialog.py                  # About dialog with donation link
     utils/
       audio_devices.py                # Device enumeration (sounddevice)
       audio_session_monitor.py        # Per-app audio session enumeration (pycaw)
@@ -63,6 +81,14 @@ TalkTrack/
     test_recording_header.py          # RecordingHeader helper tests
     test_speaker_name_panel.py        # SpeakerNamePanel helper tests
     test_segment_widget.py            # SegmentWidget helper tests
+    test_level_meter.py                # Audio level meter tests
+    test_waveform_display.py           # Waveform ring buffer tests
+    test_edit_history.py               # Undo/redo history tests
+    test_transcript_search_bar.py      # Find/replace logic tests
+    test_ai_provider.py                # AI provider factory tests
+    test_summarizer.py                 # Summary prompt builder tests
+    test_search_index.py               # Transcript search tests
+    test_chat.py                       # Chat context builder tests
   docs/plans/                         # Design docs and implementation plans
   recordings/                         # Output directory
 ```
@@ -87,6 +113,16 @@ TalkTrack/
 - Browse and replay past recordings (with friendly names)
 - Settings for model size, sample rate, output format (WAV/MP3)
 - Dark theme UI (Catppuccin Mocha palette)
+- **Audio level meters:** real-time VU meters for mic and system audio during recording
+- **Live waveform:** scrolling waveform visualization during recording
+- **Transcript find/replace:** Ctrl+F search across all segments with regex support
+- **Transcript undo/redo:** per-segment edit history with context menu
+- **AI meeting summaries:** auto-generated after transcription (configurable provider)
+- **AI action items:** extracted tasks with assignees and deadlines
+- **Searchable history:** text and semantic search across all past recordings
+- **Chat with transcript:** ask AI questions about the current recording
+- **AI provider choice:** Claude, OpenAI, or local models via Settings > AI Assistant
+- **About dialog:** version info and Buy Me a Coffee donation link
 
 ## Architecture Notes
 
@@ -134,11 +170,27 @@ TalkTrack/
 - `TranscriptSegment.original_text` tracks pre-edit text for undo support
 - Signal flow: SegmentWidget → TranscriptViewer → MainWindow (saves to disk)
 
+### AI Provider System
+- Pluggable provider abstraction: `AIProvider` base class with `complete()` and `embed()` methods
+- Three implementations: Claude (Anthropic SDK), OpenAI, Local (llama-cpp-python + sentence-transformers)
+- Factory pattern via `create_provider(config)` — returns configured provider or None
+- All providers run in QThread workers to avoid UI blocking
+- Settings tab for provider selection, API keys, and model configuration
+- Auto-summarize after transcription (disableable in settings)
+- Chat history persisted per recording as `chat_history.json`
+- Search index uses text matching (no AI needed) or semantic embeddings
+
 ### Configuration
 - Stored at ~/.talktrack/settings.json
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app")
 - Audio device selection is per-session (not persisted)
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device
+- AI settings: provider (none/claude/openai/local), api_key, model, auto_summarize
+
+### Data Files Per Recording
+- summary.md: AI-generated meeting summary
+- action_items.json: Extracted action items with assignees
+- chat_history.json: Chat conversation history
 
 ## Setup Instructions
 
