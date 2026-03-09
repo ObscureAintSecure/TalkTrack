@@ -40,6 +40,9 @@ TalkTrack/
       provider.py                      # AIProvider base class
       claude_provider.py               # Claude API implementation
       openai_provider.py               # OpenAI API implementation
+      grok_provider.py                 # Grok (xAI) via OpenAI-compatible API
+      gemini_provider.py               # Google Gemini API implementation
+      mistral_provider.py              # Mistral AI API implementation
       local_provider.py                # Local model (llama-cpp-python)
       provider_factory.py              # Factory for configured provider
       summarizer.py                    # Meeting summary + action items
@@ -174,8 +177,10 @@ TalkTrack/
 
 ### AI Provider System
 - Pluggable provider abstraction: `AIProvider` base class with `complete()` and `embed()` methods
-- Three implementations: Claude (Anthropic SDK), OpenAI, Local (llama-cpp-python + sentence-transformers)
+- Six implementations: Claude, OpenAI, Grok (xAI), Gemini (Google), Mistral, Local (llama-cpp-python)
 - Factory pattern via `create_provider(config)` — returns configured provider or None
+- AI SDK packages installed on-demand when user selects a provider (not bundled in requirements.txt)
+- Ad-hoc installer prompts user before installing, shows progress in settings dialog
 - All providers run in QThread workers to avoid UI blocking
 - Settings tab for provider selection, API keys, and model configuration
 - Auto-summarize after transcription (disableable in settings)

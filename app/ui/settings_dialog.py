@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QComboBox, QSpinBox, QCheckBox, QLineEdit,
-    QPushButton, QFileDialog, QGroupBox, QFormLayout
+    QPushButton, QFileDialog, QGroupBox, QFormLayout, QMessageBox
 )
 from PyQt6.QtCore import Qt
 
@@ -156,9 +156,17 @@ class SettingsDialog(QDialog):
         self.ai_provider_combo.addItem("None (disabled)", "none")
         self.ai_provider_combo.addItem("Claude (Anthropic)", "claude")
         self.ai_provider_combo.addItem("OpenAI", "openai")
+        self.ai_provider_combo.addItem("Grok (xAI)", "grok")
+        self.ai_provider_combo.addItem("Gemini (Google)", "gemini")
+        self.ai_provider_combo.addItem("Mistral", "mistral")
         self.ai_provider_combo.addItem("Local Model", "local")
         self.ai_provider_combo.currentIndexChanged.connect(self._on_ai_provider_changed)
         ai_form.addRow("Provider:", self.ai_provider_combo)
+
+        self.ai_package_label = QLabel("")
+        self.ai_package_label.setWordWrap(True)
+        self.ai_package_label.setVisible(False)
+        ai_form.addRow("", self.ai_package_label)
 
         self.ai_api_key_label = QLabel("API Key:")
         self.ai_api_key = QLineEdit()
@@ -289,8 +297,13 @@ class SettingsDialog(QDialog):
         max_spk = self.max_speakers_spin.value()
         self.config.set("diarization", "max_speakers", max_spk if max_spk > 0 else None)
 
-        # AI
-        self.config.set("ai", "provider", self.ai_provider_combo.currentData())
+        # AI — install package if needed before saving
+        provider_type = self.ai_provider_combo.currentData()
+        if provider_type != "none":
+            if not self._install_provider_package(provider_type):
+                return  # User cancelled install, don't save
+
+        self.config.set("ai", "provider", provider_type)
         self.config.set("ai", "api_key", self.ai_api_key.text())
         self.config.set("ai", "model", self.ai_model.currentText())
         self.config.set("ai", "local_model_path", self.ai_local_path.text())
@@ -309,7 +322,7 @@ class SettingsDialog(QDialog):
 
     def _on_ai_provider_changed(self, index):
         provider = self.ai_provider_combo.currentData()
-        is_api = provider in ("claude", "openai")
+        is_api = provider in ("claude", "openai", "grok", "gemini", "mistral")
         is_local = provider == "local"
         self.ai_api_key.setVisible(is_api)
         self.ai_api_key_label.setVisible(is_api)
@@ -321,8 +334,17 @@ class SettingsDialog(QDialog):
             self.ai_model.addItems(["claude-sonnet-4-6", "claude-haiku-4-5-20251001", "claude-opus-4-6"])
         elif provider == "openai":
             self.ai_model.addItems(["gpt-4o", "gpt-4o-mini", "gpt-4.1"])
+        elif provider == "grok":
+            self.ai_model.addItems(["grok-3", "grok-3-mini", "grok-2"])
+        elif provider == "gemini":
+            self.ai_model.addItems(["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"])
+        elif provider == "mistral":
+            self.ai_model.addItems(["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"])
         elif provider == "local":
             self.ai_model.addItem("(set path below)")
+
+        # Check if package is installed
+        self._check_provider_package(provider)
 
     def _on_device_changed(self, index):
         device = self.device_combo.currentData()
@@ -356,6 +378,74 @@ class SettingsDialog(QDialog):
             )
             self.gpu_status_label.setVisible(True)
 
+    def _check_provider_package(self, provider):
+        """Show install status for the selected provider's package."""
+        if provider == "none":
+            self.ai_package_label.setVisible(False)
+            return
+
+        from app.utils.package_installer import is_package_installed, get_package_info
+        info = get_package_info(provider)
+        if info is None:
+            self.ai_package_label.setVisible(False)
+            return
+
+        pip_package, display_name = info
+        if is_package_installed(provider):
+            self.ai_package_label.setText(
+                f'<span style="color: #a6e3a1;">{display_name} is installed.</span>'
+            )
+        else:
+            self.ai_package_label.setText(
+                f'<span style="color: #fab387;">{display_name} is not installed. '
+                f'It will be installed automatically when you test the connection or save.</span>'
+            )
+        self.ai_package_label.setVisible(True)
+
+    def _install_provider_package(self, provider):
+        """Install the required package for a provider. Returns True if ready."""
+        from app.utils.package_installer import is_package_installed, get_package_info, install_package
+        if is_package_installed(provider):
+            return True
+
+        info = get_package_info(provider)
+        if info is None:
+            return True
+
+        pip_package, display_name = info
+        reply = QMessageBox.question(
+            self,
+            "Install Required Package",
+            f"The {display_name} package is required for this provider.\n\n"
+            f"Package: {pip_package}\n\n"
+            f"Install it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return False
+
+        self.ai_package_label.setText(
+            f'<span style="color: #89b4fa;">Installing {display_name}...</span>'
+        )
+        self.ai_package_label.setVisible(True)
+        QApplication.processEvents()
+
+        success, output = install_package(pip_package)
+        if success:
+            self.ai_package_label.setText(
+                f'<span style="color: #a6e3a1;">{display_name} installed successfully.</span>'
+            )
+            return True
+        else:
+            QMessageBox.critical(
+                self, "Installation Failed",
+                f"Failed to install {pip_package}:\n\n{output[:500]}"
+            )
+            self.ai_package_label.setText(
+                f'<span style="color: #f38ba8;">Installation failed.</span>'
+            )
+            return False
+
     def _browse_local_model(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Model File", "", "GGUF Files (*.gguf);;All Files (*)"
@@ -364,14 +454,18 @@ class SettingsDialog(QDialog):
             self.ai_local_path.setText(path)
 
     def _test_ai_connection(self):
-        from PyQt6.QtWidgets import QMessageBox
-        try:
-            from app.ai.provider_factory import create_provider
-        except ImportError:
-            QMessageBox.warning(self, "AI", "AI provider module not yet available.")
+        provider_type = self.ai_provider_combo.currentData()
+        if provider_type == "none":
+            QMessageBox.information(self, "AI", "No provider selected.")
             return
+
+        # Install package if needed
+        if not self._install_provider_package(provider_type):
+            return
+
+        from app.ai.provider_factory import create_provider
         config = {
-            "provider": self.ai_provider_combo.currentData(),
+            "provider": provider_type,
             "api_key": self.ai_api_key.text(),
             "model": self.ai_model.currentText(),
             "local_model_path": self.ai_local_path.text(),

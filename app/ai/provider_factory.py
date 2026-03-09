@@ -23,6 +23,27 @@ def create_provider(config: dict) -> AIProvider | None:
             model=config.get("model", "gpt-4o"),
         )
 
+    if provider_type == "grok":
+        from app.ai.grok_provider import GrokProvider
+        return GrokProvider(
+            api_key=config["api_key"],
+            model=config.get("model", "grok-3"),
+        )
+
+    if provider_type == "gemini":
+        from app.ai.gemini_provider import GeminiProvider
+        return GeminiProvider(
+            api_key=config["api_key"],
+            model=config.get("model", "gemini-2.5-flash"),
+        )
+
+    if provider_type == "mistral":
+        from app.ai.mistral_provider import MistralProvider
+        return MistralProvider(
+            api_key=config["api_key"],
+            model=config.get("model", "mistral-large-latest"),
+        )
+
     if provider_type == "local":
         from app.ai.local_provider import LocalProvider
         return LocalProvider(

@@ -15,7 +15,9 @@ psutil>=5.9.0
 transformers>=4.45.0
 sentence-transformers>=3.0.0
 
-# AI Providers (optional - install based on your preferred provider)
-anthropic>=0.40.0
-openai>=1.50.0
-# llama-cpp-python>=0.3.0  # Uncomment for local model support
+# AI Providers — installed automatically when selected in Settings
+# anthropic>=0.40.0          # Claude
+# openai>=1.50.0             # OpenAI, Grok (xAI)
+# google-generativeai>=0.8.0 # Google Gemini
+# mistralai>=1.0.0           # Mistral
+# llama-cpp-python>=0.3.0    # Local models
