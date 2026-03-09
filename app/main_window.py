@@ -23,6 +23,7 @@ from app.ui.settings_dialog import SettingsDialog
 from app.ui.status_panel import SystemStatusDialog
 from app.ui.recording_header import RecordingHeader
 from app.ui.level_meter import LevelMeter
+from app.ui.waveform_display import WaveformDisplay
 
 
 class MainWindow(QMainWindow):
@@ -105,6 +106,13 @@ class MainWindow(QMainWindow):
         self.level_meter = LevelMeter()
         left_layout.addWidget(self.level_meter)
 
+        # Waveform display (hidden until recording starts)
+        self.waveform = WaveformDisplay(
+            seconds=5,
+            sample_rate=self.config.get("audio", "sample_rate"),
+        )
+        left_layout.addWidget(self.waveform)
+
         # Recording controls
         self.recording_controls = RecordingControls()
         left_layout.addWidget(self.recording_controls)
@@ -159,6 +167,7 @@ class MainWindow(QMainWindow):
         self.recorder.recording_finished.connect(self._on_recording_finished)
         self.recorder.error_occurred.connect(self._on_error)
         self.recorder.mic_level.connect(self.level_meter.update_mic_level)
+        self.recorder.mic_level.connect(self.waveform.append_audio)
         self.recorder.system_level.connect(self.level_meter.update_system_level)
 
         # Transcript
@@ -223,7 +232,15 @@ class MainWindow(QMainWindow):
         self.recording_controls.set_state(state)
         self.source_selector.set_enabled(state == RecordingState.IDLE)
 
-        if state == RecordingState.IDLE:
+        if state == RecordingState.RECORDING:
+            if not self.waveform.isVisible():
+                self.waveform.start()
+            else:
+                self.waveform._paint_timer.start()
+        elif state == RecordingState.PAUSED:
+            self.waveform._paint_timer.stop()
+        elif state == RecordingState.IDLE:
+            self.waveform.stop()
             self.recording_controls.reset_timer()
             self.level_meter.reset()
 
