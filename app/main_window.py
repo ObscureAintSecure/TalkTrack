@@ -193,6 +193,7 @@ class MainWindow(QMainWindow):
 
         # Recordings list
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
+        self.recordings_list.search_result_selected.connect(self._on_search_result_selected)
 
         # Recording header
         self.recording_header.name_changed.connect(self._on_recording_renamed)
@@ -482,6 +483,19 @@ class MainWindow(QMainWindow):
 
         # Switch to transcript tab
         self.tabs.setCurrentWidget(self.transcript_viewer)
+
+    def _on_search_result_selected(self, recording_id, timestamp):
+        """Load a recording from a search result."""
+        recordings_dir = Path(self.config.get("output", "directory"))
+        rec_dir = recordings_dir / recording_id
+        meta_path = rec_dir / "metadata.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+                self._on_recording_selected(metadata)
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"[MainWindow] Failed to load search result: {e}")
 
     def _save_transcript(self):
         """Save current transcript to session directory."""

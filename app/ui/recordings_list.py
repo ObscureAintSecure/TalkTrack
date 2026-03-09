@@ -11,11 +11,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction
 
+from app.ui.search_bar import SearchBar
+
 
 class RecordingsList(QWidget):
     """Browse and manage past recordings."""
 
     recording_selected = pyqtSignal(dict)  # metadata dict
+    search_result_selected = pyqtSignal(str, float)  # recording_id, timestamp
 
     def __init__(self, recordings_dir, parent=None):
         super().__init__(parent)
@@ -40,6 +43,12 @@ class RecordingsList(QWidget):
         header.addWidget(self.refresh_btn)
 
         layout.addLayout(header)
+
+        # Search bar
+        self.search_bar = SearchBar()
+        self.search_bar.search_requested.connect(self._on_search)
+        self.search_bar.cleared.connect(self.refresh)
+        layout.addWidget(self.search_bar)
 
         # List
         self.list_widget = QListWidget()
@@ -94,9 +103,14 @@ class RecordingsList(QWidget):
             self.list_widget.addItem(item)
 
     def _on_item_double_clicked(self, item):
-        metadata = item.data(Qt.ItemDataRole.UserRole)
-        if metadata:
-            self.recording_selected.emit(metadata)
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data is None:
+            return
+        if "recording_id" in data and "directory" not in data:
+            # This is a search result
+            self.search_result_selected.emit(data["recording_id"], data.get("start", 0.0))
+        else:
+            self.recording_selected.emit(data)
 
     def _show_context_menu(self, position):
         item = self.list_widget.itemAt(position)
@@ -133,6 +147,45 @@ class RecordingsList(QWidget):
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")
         if audio_path and os.path.exists(audio_path):
             os.startfile(audio_path)
+
+    def _on_search(self, query, is_semantic):
+        from app.ai.search_index import load_all_transcripts, text_search
+        transcripts = load_all_transcripts(self.recordings_dir)
+
+        if is_semantic:
+            try:
+                from app.ai.search_index import semantic_search
+                from app.ai.provider_factory import create_provider
+                from app.utils.config import Config
+                config = Config()
+                ai_config = config.data.get("ai", {})
+                provider = create_provider(ai_config)
+                if provider is not None:
+                    results = semantic_search(query, transcripts, provider)
+                else:
+                    results = text_search(query, transcripts)
+            except Exception:
+                results = text_search(query, transcripts)
+        else:
+            results = text_search(query, transcripts)
+
+        self._show_search_results(results)
+
+    def _show_search_results(self, results):
+        self.list_widget.clear()
+        for result in results[:50]:
+            rec_id = result["recording_id"]
+            speaker = result.get("speaker", "")
+            text = result["text"]
+            display = f"{rec_id}\n"
+            if speaker:
+                display += f"  [{speaker}] "
+            display += text[:80]
+            if len(text) > 80:
+                display += "..."
+            item = QListWidgetItem(display)
+            item.setData(Qt.ItemDataRole.UserRole, result)
+            self.list_widget.addItem(item)
 
     def _format_duration(self, seconds):
         h = int(seconds // 3600)
