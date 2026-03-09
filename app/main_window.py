@@ -28,6 +28,8 @@ from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
 from app.ui.summary_panel import SummaryPanel
 from app.ui.action_items_panel import ActionItemsPanel
+from app.ui.chat_panel import ChatPanel
+from app.ai.chat import build_chat_context
 
 
 class MainWindow(QMainWindow):
@@ -161,6 +163,10 @@ class MainWindow(QMainWindow):
         self.action_items_panel = ActionItemsPanel()
         self.tabs.addTab(self.action_items_panel, "Action Items")
 
+        # Chat tab
+        self.chat_panel = ChatPanel()
+        self.tabs.addTab(self.chat_panel, "Chat")
+
         right_layout.addWidget(self.tabs)
         splitter.addWidget(right_panel)
 
@@ -237,6 +243,7 @@ class MainWindow(QMainWindow):
             app_pids=app_pids,
         )
         self.notes_panel.set_recording_start(datetime.now())
+        self.chat_panel.clear_chat()
         self.status_label.setText("Recording...")
 
     def _toggle_pause(self):
@@ -415,6 +422,9 @@ class MainWindow(QMainWindow):
         self._transcript = result
         self._maybe_auto_summarize()
 
+        # Update chat panel context
+        self._update_chat_context()
+
     def _on_transcription_error(self, error_msg):
         self.transcript_viewer.hide_progress()
         self.status_label.setText("Transcription failed.")
@@ -451,6 +461,7 @@ class MainWindow(QMainWindow):
                     duration=data.get("duration", 0),
                 )
                 self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
+                self._transcript = result
             except Exception as e:
                 print(f"[MainWindow] Failed to load transcript: {e}")
 
@@ -480,6 +491,19 @@ class MainWindow(QMainWindow):
                     self.action_items_panel.set_items(json.load(f))
             except (json.JSONDecodeError, OSError):
                 pass
+
+        # Update chat panel context for loaded recording
+        self.chat_panel.set_session_dir(metadata["directory"])
+        try:
+            from app.ai.provider_factory import create_provider
+            ai_config = self.config.data.get("ai", {})
+            provider = create_provider(ai_config)
+            self.chat_panel.set_provider(provider)
+        except Exception:
+            self.chat_panel.set_provider(None)
+
+        if hasattr(self, '_transcript') and self._transcript is not None:
+            self._update_chat_context()
 
         # Switch to transcript tab
         self.tabs.setCurrentWidget(self.transcript_viewer)
@@ -583,6 +607,26 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         dialog = AboutDialog(self)
         dialog.exec()
+
+    def _update_chat_context(self):
+        if self._transcript:
+            speaker_names = getattr(self, '_speaker_names', {})
+            if not speaker_names:
+                speaker_names = self.transcript_viewer._speaker_names
+            context = build_chat_context(self._transcript.segments, speaker_names)
+            self.chat_panel.set_context(context)
+
+        if self._current_session:
+            self.chat_panel.set_session_dir(self._current_session["directory"])
+
+        # Set provider
+        try:
+            from app.ai.provider_factory import create_provider
+            ai_config = self.config.data.get("ai", {})
+            provider = create_provider(ai_config)
+            self.chat_panel.set_provider(provider)
+        except Exception:
+            self.chat_panel.set_provider(None)
 
     def _maybe_auto_summarize(self):
         if not self.config.get("ai", "auto_summarize"):
