@@ -26,6 +26,8 @@ from app.ui.recording_header import RecordingHeader
 from app.ui.level_meter import LevelMeter
 from app.ui.waveform_display import WaveformDisplay
 from app.ui.about_dialog import AboutDialog, BMAC_URL
+from app.ui.summary_panel import SummaryPanel
+from app.ui.action_items_panel import ActionItemsPanel
 
 
 class MainWindow(QMainWindow):
@@ -151,6 +153,14 @@ class MainWindow(QMainWindow):
         self.notes_panel = NotesPanel()
         self.tabs.addTab(self.notes_panel, "Notes")
 
+        # Summary tab
+        self.summary_panel = SummaryPanel()
+        self.tabs.addTab(self.summary_panel, "Summary")
+
+        # Action Items tab
+        self.action_items_panel = ActionItemsPanel()
+        self.tabs.addTab(self.action_items_panel, "Action Items")
+
         right_layout.addWidget(self.tabs)
         splitter.addWidget(right_panel)
 
@@ -190,6 +200,10 @@ class MainWindow(QMainWindow):
         # Transcript editing
         self.transcript_viewer.transcript_changed.connect(self._save_transcript)
         self.transcript_viewer.speaker_names_changed.connect(self._save_speaker_names)
+
+        # Summary / action items
+        self.summary_panel.regenerate_requested.connect(self._regenerate_summary)
+        self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
 
     def _start_recording(self):
         mic = self.source_selector.get_selected_mic()
@@ -396,6 +410,10 @@ class MainWindow(QMainWindow):
         # Save transcript
         self._save_transcript()
 
+        # Auto-summarize if AI provider configured
+        self._transcript = result
+        self._maybe_auto_summarize()
+
     def _on_transcription_error(self, error_msg):
         self.transcript_viewer.hide_progress()
         self.status_label.setText("Transcription failed.")
@@ -443,6 +461,24 @@ class MainWindow(QMainWindow):
 
         # Load notes
         self.notes_panel.set_session_dir(metadata["directory"])
+
+        # Load saved summary and action items
+        session_dir = Path(metadata["directory"])
+        summary_path = session_dir / "summary.md"
+        if summary_path.exists():
+            try:
+                with open(summary_path, "r", encoding="utf-8") as f:
+                    self.summary_panel.set_summary(f.read())
+            except OSError:
+                pass
+
+        actions_path = session_dir / "action_items.json"
+        if actions_path.exists():
+            try:
+                with open(actions_path, "r", encoding="utf-8") as f:
+                    self.action_items_panel.set_items(json.load(f))
+            except (json.JSONDecodeError, OSError):
+                pass
 
         # Switch to transcript tab
         self.tabs.setCurrentWidget(self.transcript_viewer)
@@ -533,6 +569,81 @@ class MainWindow(QMainWindow):
     def _show_about(self):
         dialog = AboutDialog(self)
         dialog.exec()
+
+    def _maybe_auto_summarize(self):
+        if not self.config.get("ai", "auto_summarize"):
+            return
+        if self.config.get("ai", "provider") == "none":
+            return
+        if not getattr(self, '_transcript', None):
+            return
+        self._run_summarize()
+
+    def _regenerate_summary(self):
+        if not getattr(self, '_transcript', None):
+            return
+        self._run_summarize()
+
+    def _run_summarize(self):
+        from app.ai.summarizer import build_summary_prompt, build_action_items_prompt, parse_action_items
+        from app.ai.provider_factory import create_provider
+        from PyQt6.QtCore import QThread, pyqtSignal
+
+        ai_config = self.config.data.get("ai", {})
+        try:
+            provider = create_provider(ai_config)
+        except Exception:
+            return
+        if provider is None:
+            return
+
+        self.summary_panel.set_loading()
+        self.action_items_panel.set_loading()
+
+        class SummarizeWorker(QThread):
+            summary_ready = pyqtSignal(str)
+            actions_ready = pyqtSignal(list)
+            error = pyqtSignal(str)
+
+            def __init__(self, provider, segments, speaker_names):
+                super().__init__()
+                self._provider = provider
+                self._segments = segments
+                self._names = speaker_names
+
+            def run(self):
+                try:
+                    summary_prompt = build_summary_prompt(self._segments, self._names)
+                    summary = self._provider.complete(summary_prompt)
+                    self.summary_ready.emit(summary)
+
+                    actions_prompt = build_action_items_prompt(self._segments, self._names)
+                    actions_response = self._provider.complete(actions_prompt)
+                    actions = parse_action_items(actions_response)
+                    self.actions_ready.emit(actions)
+                except Exception as e:
+                    self.error.emit(str(e))
+
+        speaker_names = self.transcript_viewer._speaker_names
+        self._summarize_worker = SummarizeWorker(provider, self._transcript.segments, speaker_names)
+        self._summarize_worker.summary_ready.connect(self._on_summary_ready)
+        self._summarize_worker.actions_ready.connect(self._on_actions_ready)
+        self._summarize_worker.error.connect(lambda e: self.status_label.setText(f"AI error: {e}"))
+        self._summarize_worker.start()
+
+    def _on_summary_ready(self, summary):
+        self.summary_panel.set_summary(summary)
+        if self._current_session:
+            path = Path(self._current_session["directory"]) / "summary.md"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(summary)
+
+    def _on_actions_ready(self, items):
+        self.action_items_panel.set_items(items)
+        if self._current_session:
+            path = Path(self._current_session["directory"]) / "action_items.json"
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(items, f, indent=2)
 
     def closeEvent(self, event):
         if self.recorder.state != RecordingState.IDLE:
