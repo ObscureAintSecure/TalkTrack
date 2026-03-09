@@ -86,6 +86,16 @@ class MainWindow(QMainWindow):
 
         help_menu.addSeparator()
 
+        log_action = QAction("Open &Log File", self)
+        log_action.triggered.connect(self._open_log_file)
+        help_menu.addAction(log_action)
+
+        report_action = QAction("&Report a Bug...", self)
+        report_action.triggered.connect(self._report_bug)
+        help_menu.addAction(report_action)
+
+        help_menu.addSeparator()
+
         support_action = QAction("Support TalkTrack", self)
         support_action.triggered.connect(lambda: webbrowser.open(BMAC_URL))
         help_menu.addAction(support_action)
@@ -609,6 +619,19 @@ class MainWindow(QMainWindow):
         hf_token = self.config.get("diarization", "hf_token")
         if not hf_token:
             QTimer.singleShot(300, self._show_diarization_setup)
+
+    def _open_log_file(self):
+        import os
+        from main import get_log_file
+        log_path = get_log_file()
+        if log_path.exists():
+            os.startfile(str(log_path))
+        else:
+            QMessageBox.information(self, "Log File", "No log file found yet.")
+
+    def _report_bug(self):
+        from main import build_bug_report_url
+        webbrowser.open(build_bug_report_url())
 
     def _show_about(self):
         dialog = AboutDialog(self)
