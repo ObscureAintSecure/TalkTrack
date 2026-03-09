@@ -275,6 +275,12 @@ class SegmentWidget(QWidget):
         self.edit_indicator.setVisible(False)
         self.text_reverted.emit(self._index)
 
+    def highlight_match(self, start, end):
+        """Briefly flash the segment to show the match."""
+        self.setStyleSheet("background-color: #45475a;")
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(1500, lambda: self.setStyleSheet(""))
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape and self._editing:
             self.cancel_edit()
