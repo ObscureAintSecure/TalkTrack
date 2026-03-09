@@ -1,8 +1,8 @@
 # TalkTrack
 
-Record, transcribe, and identify speakers from your calls — all locally on your machine.
+Record, transcribe, and identify speakers from your calls — all locally on your machine. Free and open-source alternative to Evaer, Otter.ai, and Fireflies.
 
-TalkTrack is a Windows desktop app that captures audio from Teams, Zoom, and other call apps, then transcribes it with [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) and identifies speakers with [pyannote.audio](https://github.com/pyannote/pyannote-audio). Everything runs offline — no cloud services, no data leaves your PC.
+TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Teams calls, Zoom meetings, Google Meet sessions**, and any other audio app. It uses [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) for local speech-to-text and [pyannote.audio](https://github.com/pyannote/pyannote-audio) for speaker identification. Everything runs offline — no cloud services, no subscriptions, no data leaves your PC.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6)
@@ -10,6 +10,14 @@ TalkTrack is a Windows desktop app that captures audio from Teams, Zoom, and oth
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ![TalkTrack screenshot](resources/screenshot.jpg)
+
+## Why TalkTrack?
+
+- **No cloud uploads** — your meeting recordings and transcripts stay on your machine
+- **No subscriptions** — free and open-source, no monthly fees like Otter.ai or Fireflies
+- **Works with any app** — Microsoft Teams, Zoom, Google Meet, Discord, Slack huddles, WebEx, or any app that plays audio
+- **Per-app capture** — on Windows 11, record only your call app without picking up Spotify or YouTube in the background
+- **AI-powered** — state-of-the-art Whisper speech recognition + pyannote speaker diarization, running locally on your hardware
 
 ## Features
 
@@ -191,6 +199,15 @@ python -m pytest tests/ -v
 | Deep Learning | PyTorch |
 | Audio Processing | scipy, pydub, soundfile, numpy |
 | Windows Integration | pywin32, pycaw, comtypes |
+
+## Use Cases
+
+- **Meeting minutes** — Record your Teams or Zoom meetings and get searchable, timestamped transcripts
+- **Interview recording** — Capture job interviews or user research calls with speaker labels
+- **Lecture capture** — Record online lectures or webinars for later review
+- **Podcast recording** — Record remote podcast guests from Discord or Zoom with per-speaker transcripts
+- **Compliance & documentation** — Keep records of client calls with exportable transcripts
+- **Accessibility** — Generate subtitles (SRT) from any recorded call for hearing-impaired participants
 
 ## Known Limitations
 
