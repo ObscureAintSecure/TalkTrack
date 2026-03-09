@@ -156,10 +156,12 @@ TalkTrack/
 - Transcription/diarization runs in separate QThread workers
 
 ### System Status Panel
-- `DependencyChecker` runs health checks: mic, WASAPI, Whisper model, HF token, pyannote, FFmpeg, Windows version
+- `DependencyChecker` runs health checks: mic, WASAPI, GPU/CUDA, Whisper model, HF token, pyannote, FFmpeg, Windows version
+- GPU check detects NVIDIA GPU via torch or nvidia-smi, warns if CUDA PyTorch not installed
 - `SystemStatusDialog` shows results with actionable fix suggestions
 - Auto-shows on startup if critical checks fail
 - Accessible via Help > System Status
+- Settings dialog shows inline GPU status when CUDA is selected as compute device
 
 ### Transcript Enhancement Suite
 - `SegmentWidget`: Interactive row per transcript segment — play button, timestamp, speaker label (clickable), editable text, edit indicator

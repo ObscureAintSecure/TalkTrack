@@ -115,10 +115,25 @@ class TranscriptionWorker(QThread):
             self.progress.emit("Loading transcription model...")
             from faster_whisper import WhisperModel
 
-            compute_type = "float16" if self.device == "cuda" else "int8"
+            device = self.device
+            if device == "cuda":
+                try:
+                    import torch
+                    if not torch.cuda.is_available():
+                        self.progress.emit(
+                            "CUDA selected but not available — falling back to CPU. "
+                            "Install CUDA PyTorch for GPU acceleration: "
+                            "pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126"
+                        )
+                        device = "cpu"
+                except ImportError:
+                    self.progress.emit("PyTorch not found — falling back to CPU.")
+                    device = "cpu"
+
+            compute_type = "float16" if device == "cuda" else "int8"
             model = WhisperModel(
                 self.model_size,
-                device=self.device,
+                device=device,
                 compute_type=compute_type,
             )
 

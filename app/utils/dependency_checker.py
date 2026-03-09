@@ -1,5 +1,6 @@
 """Dependency checker for TalkTrack system status panel."""
 import shutil
+import subprocess
 from pathlib import Path
 
 from app.utils.audio_devices import get_input_devices, get_wasapi_output_devices
@@ -17,6 +18,7 @@ class DependencyChecker:
         return [
             self.check_microphone(),
             self.check_wasapi(),
+            self.check_gpu_cuda(),
             self.check_ffmpeg(),
             self.check_whisper_model(),
             self.check_hf_token(),
@@ -80,6 +82,93 @@ class DependencyChecker:
                 "level": "critical",
                 "message": f"Error checking WASAPI: {e}",
                 "action": "Ensure Windows audio services are running.",
+            }
+
+    @staticmethod
+    def detect_gpu_cuda():
+        """Detect NVIDIA GPU presence and CUDA PyTorch status.
+
+        Returns dict with keys:
+            has_nvidia_gpu (bool): True if NVIDIA GPU detected
+            gpu_name (str): GPU name or empty string
+            torch_has_cuda (bool): True if PyTorch has CUDA support
+            cuda_version (str): CUDA version string or empty
+        """
+        result = {
+            "has_nvidia_gpu": False,
+            "gpu_name": "",
+            "torch_has_cuda": False,
+            "cuda_version": "",
+        }
+        # Check for NVIDIA GPU via torch first (most reliable if available)
+        try:
+            import torch
+            result["torch_has_cuda"] = torch.cuda.is_available()
+            if result["torch_has_cuda"]:
+                result["has_nvidia_gpu"] = True
+                result["gpu_name"] = torch.cuda.get_device_name(0)
+                result["cuda_version"] = torch.version.cuda or ""
+                return result
+            # torch installed but no CUDA — check if GPU exists via subprocess
+        except ImportError:
+            pass
+
+        # Fallback: detect NVIDIA GPU via nvidia-smi
+        try:
+            output = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if output.returncode == 0 and output.stdout.strip():
+                result["has_nvidia_gpu"] = True
+                result["gpu_name"] = output.stdout.strip().split("\n")[0]
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+        return result
+
+    def check_gpu_cuda(self):
+        """Check GPU availability and CUDA PyTorch setup."""
+        info = self.detect_gpu_cuda()
+
+        # Check what device the user has configured
+        configured_device = "cpu"
+        if self.config:
+            try:
+                configured_device = self.config.get("transcription", "device")
+            except (KeyError, TypeError):
+                pass
+
+        if info["torch_has_cuda"]:
+            return {
+                "name": "GPU Acceleration",
+                "passed": True,
+                "level": "info",
+                "message": f"NVIDIA {info['gpu_name']} detected with CUDA {info['cuda_version']}.",
+                "action": None,
+            }
+        elif info["has_nvidia_gpu"]:
+            action = (
+                f"NVIDIA {info['gpu_name']} detected but PyTorch is CPU-only. "
+                "To enable GPU acceleration, run:\n"
+                "pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126"
+            )
+            if configured_device == "cuda":
+                action += "\nTranscription will fall back to CPU until this is resolved."
+            return {
+                "name": "GPU Acceleration",
+                "passed": False,
+                "level": "warn",
+                "message": f"NVIDIA {info['gpu_name']} found but CUDA PyTorch not installed.",
+                "action": action,
+            }
+        else:
+            return {
+                "name": "GPU Acceleration",
+                "passed": True if configured_device == "cpu" else False,
+                "level": "info",
+                "message": "No NVIDIA GPU detected. Using CPU for transcription.",
+                "action": None if configured_device == "cpu" else "Set Compute Device to CPU in Settings.",
             }
 
     def check_whisper_model(self):

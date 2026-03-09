@@ -89,7 +89,14 @@ class SettingsDialog(QDialog):
         self.device_combo = QComboBox()
         self.device_combo.addItem("CPU", "cpu")
         self.device_combo.addItem("CUDA (NVIDIA GPU)", "cuda")
+        self.device_combo.currentIndexChanged.connect(self._on_device_changed)
         whisper_form.addRow("Compute Device:", self.device_combo)
+
+        self.gpu_status_label = QLabel("")
+        self.gpu_status_label.setWordWrap(True)
+        self.gpu_status_label.setOpenExternalLinks(True)
+        self.gpu_status_label.setVisible(False)
+        whisper_form.addRow("", self.gpu_status_label)
 
         self.language_edit = QLineEdit()
         self.language_edit.setPlaceholderText("auto-detect (leave empty)")
@@ -240,6 +247,8 @@ class SettingsDialog(QDialog):
         if lang:
             self.language_edit.setText(lang)
 
+        self._on_device_changed(self.device_combo.currentIndex())
+
         # Diarization
         self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
         self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
@@ -314,6 +323,38 @@ class SettingsDialog(QDialog):
             self.ai_model.addItems(["gpt-4o", "gpt-4o-mini", "gpt-4.1"])
         elif provider == "local":
             self.ai_model.addItem("(set path below)")
+
+    def _on_device_changed(self, index):
+        device = self.device_combo.currentData()
+        if device != "cuda":
+            self.gpu_status_label.setVisible(False)
+            return
+
+        from app.utils.dependency_checker import DependencyChecker
+        info = DependencyChecker.detect_gpu_cuda()
+
+        if info["torch_has_cuda"]:
+            self.gpu_status_label.setText(
+                f'<span style="color: #a6e3a1;">&#x2705; {info["gpu_name"]} ready '
+                f'(CUDA {info["cuda_version"]})</span>'
+            )
+            self.gpu_status_label.setVisible(True)
+        elif info["has_nvidia_gpu"]:
+            self.gpu_status_label.setText(
+                f'<span style="color: #fab387;">&#x26a0;&#xfe0f; {info["gpu_name"]} detected but '
+                f'PyTorch is CPU-only.<br>'
+                f'To enable GPU acceleration, run in your terminal:<br>'
+                f'<code>pip install torch torchaudio --index-url '
+                f'https://download.pytorch.org/whl/cu126</code><br>'
+                f'Then restart TalkTrack. Until then, transcription will use CPU.</span>'
+            )
+            self.gpu_status_label.setVisible(True)
+        else:
+            self.gpu_status_label.setText(
+                '<span style="color: #f38ba8;">&#x274c; No NVIDIA GPU detected. '
+                'CUDA requires an NVIDIA graphics card.</span>'
+            )
+            self.gpu_status_label.setVisible(True)
 
     def _browse_local_model(self):
         path, _ = QFileDialog.getOpenFileName(
