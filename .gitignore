@@ -15,5 +15,7 @@ recordings/
 *.avi
 .claude/
 .worktrees/
+CLAUDE.md
+docs/plans/
 nul
 temp.txt

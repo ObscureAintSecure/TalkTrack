@@ -22,20 +22,27 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 
 ## Features
 
-- **Record calls** with Record / Pause / Resume / Stop controls and a live timer
+- **Record calls** with Record / Pause / Resume / Stop controls, live timer, and level meters
 - **Per-app audio capture** (Windows 11) — pick specific apps like Teams or Chrome
 - **System audio capture** (Windows 10+) — WASAPI loopback for all system audio
 - **Dual-channel recording** — microphone + system/app audio captured separately
+- **Auto-stop recording** — detects when your call app goes inactive and offers to stop
 - **Local transcription** — Faster Whisper (OpenAI Whisper), no internet required
 - **Speaker diarization** — two modes:
   - *Simple* (no setup): labels "You" vs "Remote" from mic vs system channels
   - *Full* (pyannote.audio): identifies individual speakers with a free HuggingFace token
+- **AI assistant** — optional AI-powered meeting summaries, action items, and transcript chat (supports Claude, OpenAI, Grok, Gemini, Mistral, or local models)
 - **Interactive transcript** — click any segment to replay its audio, edit text inline, assign speaker names
 - **Export** to TXT, SRT (subtitles), or JSON
 - **Call notes** with timestamp insertion
 - **Recording browser** — browse and replay past recordings
+- **Collapsible audio sources** — compact UI with expandable source selector
+- **GPU/CUDA detection** — System Status panel detects your GPU and guides CUDA setup
+- **File logging** — all errors logged to `~/.talktrack/talktrack.log` with crash dialog
+- **Bug reporting** — submit issues directly from the app via pre-filled GitHub issues
 - **Dark theme** UI (Catppuccin Mocha palette)
 - **Guided setup wizard** for HuggingFace / pyannote configuration
+- **Auto-install dependencies** — first launch detects and installs required packages
 
 ## Quick Start
 
@@ -45,19 +52,21 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - Python 3.10+
 - A microphone
 
-### Install
+### Install & Run
 
 ```bash
 git clone https://github.com/ObscureAintSecure/TalkTrack.git
 cd TalkTrack
-pip install -r requirements.txt
 ```
 
-### Run
+Double-click **`start.bat`** — it automatically detects missing dependencies and installs them on first launch (with your confirmation). No manual `pip install` needed.
 
-Double-click **`start.bat`**, or:
+For troubleshooting, use **`start_debug.bat`** which shows a console window with log output.
+
+Or run manually:
 
 ```bash
+pip install -r requirements.txt
 python main.py
 ```
 
@@ -114,6 +123,8 @@ Models are downloaded automatically on first use and cached locally. No internet
 - **CPU** (`int8` quantization) — works on any machine, no extra setup. Good enough for most use cases.
 - **CUDA** (`float16`) — significantly faster if you have an NVIDIA GPU with CUDA installed. Select "CUDA (NVIDIA GPU)" in Settings > Transcription > Compute Device.
 
+TalkTrack automatically detects your GPU and CUDA availability in the **System Status** panel (Help > System Status) and shows guidance if CUDA isn't properly configured.
+
 ### Language
 
 By default, Whisper auto-detects the spoken language. You can set a specific language in Settings > Transcription > Language (e.g., `en`, `es`, `de`) to improve accuracy and speed if you know what language will be spoken.
@@ -133,6 +144,23 @@ Uses the [pyannote.audio](https://github.com/pyannote/pyannote-audio) neural pip
 You can optionally set min/max speaker counts in Settings to help the model when you know how many people are on the call.
 
 After diarization, use the **Speaker Name Panel** in the transcript viewer to map generic labels (SPEAKER_00) to real names. Names are saved per recording and included in exports.
+
+## AI Assistant (Optional)
+
+TalkTrack integrates with AI providers to generate meeting summaries, extract action items, and chat with your transcripts. AI features are entirely optional — the core recording and transcription works without them.
+
+### Supported Providers
+
+| Provider | Models | Package |
+|----------|--------|---------|
+| **Claude** (Anthropic) | claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4-6 | `anthropic` |
+| **OpenAI** | gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo | `openai` |
+| **Grok** (xAI) | grok-3, grok-3-mini, grok-2 | `openai` |
+| **Google Gemini** | gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash | `google-generativeai` |
+| **Mistral** | mistral-large-latest, mistral-medium, mistral-small | `mistralai` |
+| **Local** | Any GGUF model via llama-cpp-python | `llama-cpp-python` |
+
+SDK packages are **installed automatically** when you select a provider — no need to install them manually. Configure your provider and API key in **Settings > AI**.
 
 ## Export Formats
 
@@ -155,15 +183,18 @@ Access via the gear icon or **Edit > Settings**:
 | Language | Auto-detect, or specify (en, es, etc.) | Auto-detect |
 | Sample Rate | 16000, 22050, 44100, 48000 Hz | 16000 |
 | Output Format | WAV, MP3 (requires FFmpeg) | WAV |
-| Capture Mode | Per-app (Win11) or Legacy | Auto-detected |
+| Capture Mode | Per-app (Win11) or System Audio | Auto-detected |
 | Diarization | Enabled/Disabled, min/max speakers | Disabled |
+| AI Provider | None, Claude, OpenAI, Grok, Gemini, Mistral, Local | None |
+| AI Model | Provider-specific model list | Varies |
 
 ## Project Structure
 
 ```
 TalkTrack/
-  main.py                    # Entry point
-  start.bat / start.ps1      # Launcher scripts
+  main.py                    # Entry point, logging, crash handling
+  start.bat                  # Launcher (auto-installs dependencies)
+  start_debug.bat            # Debug launcher with console output
   requirements.txt           # Dependencies
   resources/style.qss        # Dark theme stylesheet
   app/
@@ -171,12 +202,13 @@ TalkTrack/
     audio/
       segment_player.py      # Audio clip playback
     recording/
-      audio_capture.py       # WASAPI capture (legacy + per-app)
+      audio_capture.py       # WASAPI capture (system + per-app)
       process_audio_capture.py  # Win11 per-process capture
       recorder.py            # Recording state machine
     transcription/
       transcriber.py         # Faster Whisper integration
       diarizer.py            # Speaker diarization (pyannote)
+    ai/                      # AI provider integrations (6 providers)
     ui/                      # All UI components
     utils/                   # Config, device enumeration, helpers
   tests/                     # Unit tests
@@ -197,6 +229,7 @@ python -m pytest tests/ -v
 | Audio Capture | sounddevice, WASAPI, comtypes |
 | Transcription | faster-whisper |
 | Speaker Diarization | pyannote.audio 4.0 |
+| AI Providers | anthropic, openai, google-generativeai, mistralai (on-demand) |
 | Deep Learning | PyTorch |
 | Audio Processing | scipy, pydub, soundfile, numpy |
 | Windows Integration | pywin32, pycaw, comtypes |
