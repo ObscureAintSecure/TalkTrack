@@ -1,7 +1,7 @@
 """Real-time audio level meter widget with peak hold."""
 
 import numpy as np
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QVBoxLayout
 
@@ -11,7 +11,7 @@ DB_FLOOR = -60.0
 
 
 def compute_rms_db(audio_chunk: np.ndarray) -> float:
-    """Compute RMS level in dB from a numpy audio chunk."""
+    """Compute RMS level in dB from a normalized [-1.0, 1.0] float audio chunk."""
     if audio_chunk.size == 0:
         return DB_FLOOR
     rms = np.sqrt(np.mean(audio_chunk.astype(np.float64) ** 2))
@@ -36,6 +36,12 @@ class LevelBar(QWidget):
         self._peak_hold_frames = 0
         self.setMinimumHeight(12)
         self.setMaximumHeight(16)
+
+    def reset(self):
+        self._level = 0.0
+        self._peak = 0.0
+        self._peak_hold_frames = 0
+        self.update()
 
     def set_level(self, fraction: float):
         self._level = max(0.0, min(1.0, fraction))
@@ -127,9 +133,5 @@ class LevelMeter(QWidget):
         self._sys_bar.set_level(db_to_fraction(db))
 
     def reset(self):
-        self._mic_bar.set_level(0.0)
-        self._mic_bar._peak = 0.0
-        self._sys_bar.set_level(0.0)
-        self._sys_bar._peak = 0.0
-        self._mic_bar.update()
-        self._sys_bar.update()
+        self._mic_bar.reset()
+        self._sys_bar.reset()
