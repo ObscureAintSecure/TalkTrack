@@ -14,5 +14,6 @@ recordings/
 *.mp4
 *.avi
 .claude/
+.worktrees/
 nul
 temp.txt
