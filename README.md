@@ -27,6 +27,7 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **System audio capture** (Windows 10+) — WASAPI loopback for all system audio
 - **Dual-channel recording** — microphone + system/app audio captured separately
 - **Auto-stop recording** — detects when your call app goes inactive and offers to stop
+- **Auto-start recording** — optionally start recording when a selected app joins a call (Settings > General)
 - **Local transcription** — Faster Whisper (OpenAI Whisper), no internet required
 - **Speaker diarization** — two modes:
   - *Simple* (no setup): labels "You" vs "Remote" from mic vs system channels
@@ -36,12 +37,13 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **Manual AI generation** — generate or regenerate summaries and action items on demand
 - **Notes in AI context** — call notes are included in AI summary and action item generation
 - **Interactive transcript** — click any segment to replay its audio, edit text inline, assign speaker names
+- **Play All** — sequential playback of the full transcript with real-time line highlighting and auto-scroll
 - **Export** to TXT, SRT (subtitles), or JSON
 - **Call notes** with timestamp insertion
 - **Recording browser** — browse, replay, and bulk-delete past recordings (multi-select with Ctrl/Shift+click)
 - **Hidden devices filter** — hide unwanted audio devices (e.g., Voicemeeter) from dropdowns via Settings
 - **Remembers capture settings** — capture mode and selected apps persist across sessions
-- **Min duration filter** — skip auto-transcription for short recordings (configurable threshold)
+- **Min recording length** — automatically discard recordings shorter than a configurable threshold (Settings > General)
 - **Custom app icon** — TalkTrack.exe launcher with embedded icon for proper Windows taskbar display
 - **Collapsible audio sources** — compact UI with expandable source selector
 - **GPU/CUDA detection** — System Status panel detects your GPU and guides CUDA setup
@@ -100,9 +102,9 @@ Without this setup, TalkTrack still works — it just labels speakers as "You" a
 
 1. Start your call in Teams, Zoom, or any app
 2. In TalkTrack, select your microphone and the app to capture
-3. Click **Record**
+3. Click **Record** (or enable auto-record in Settings > General to start automatically when your app joins a call)
 4. When done, click **Stop** — transcription starts automatically
-5. Review the transcript, assign speaker names, edit text, export
+5. Review the transcript, assign speaker names, use **Play All** to follow along, then export
 
 **Windows 11:** Select specific apps (Teams, Chrome, etc.) in the app picker to capture only their audio.
 
@@ -202,7 +204,8 @@ Access via the gear icon or **Edit > Settings**:
 | Diarization | Enabled/Disabled, min/max speakers | Disabled |
 | AI Provider | None, Claude, OpenAI, Grok, Gemini, Mistral, Local | None |
 | AI Model | Provider-specific model list | Varies |
-| Min Duration | Skip transcription for recordings under N seconds | 10s |
+| Min Recording Length | Discard recordings shorter than N seconds | 5s |
+| Auto-Record | Start recording when selected app joins a call | Off |
 | Hidden Devices | Filter out unwanted audio devices by keyword | None |
 
 ## Project Structure
@@ -217,6 +220,7 @@ TalkTrack/
   resources/
     style.qss                # Dark theme stylesheet
     talktrack.ico             # App icon (multi-size)
+    arrow_up.png, arrow_down.png  # QSpinBox arrow icons
     build_ico.py              # Rebuild .ico from source PNGs
     TT_icon_*.png             # Icon source files (32-512px)
     TT_logo_*.png             # Logo files for branding
