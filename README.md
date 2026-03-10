@@ -32,10 +32,17 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
   - *Simple* (no setup): labels "You" vs "Remote" from mic vs system channels
   - *Full* (pyannote.audio): identifies individual speakers with a free HuggingFace token
 - **AI assistant** — optional AI-powered meeting summaries, action items, and transcript chat (supports Claude, OpenAI, Grok, Gemini, Mistral, or local models)
+- **Per-provider AI settings** — API keys and models stored separately per provider, switch without losing config
+- **Manual AI generation** — generate or regenerate summaries and action items on demand
+- **Notes in AI context** — call notes are included in AI summary and action item generation
 - **Interactive transcript** — click any segment to replay its audio, edit text inline, assign speaker names
 - **Export** to TXT, SRT (subtitles), or JSON
 - **Call notes** with timestamp insertion
-- **Recording browser** — browse and replay past recordings
+- **Recording browser** — browse, replay, and bulk-delete past recordings (multi-select with Ctrl/Shift+click)
+- **Hidden devices filter** — hide unwanted audio devices (e.g., Voicemeeter) from dropdowns via Settings
+- **Remembers capture settings** — capture mode and selected apps persist across sessions
+- **Min duration filter** — skip auto-transcription for short recordings (configurable threshold)
+- **Custom app icon** — TalkTrack.exe launcher with embedded icon for proper Windows taskbar display
 - **Collapsible audio sources** — compact UI with expandable source selector
 - **GPU/CUDA detection** — System Status panel detects your GPU and guides CUDA setup
 - **File logging** — all errors logged to `~/.talktrack/talktrack.log` with crash dialog
@@ -60,6 +67,14 @@ cd TalkTrack
 ```
 
 Double-click **`start.bat`** — it automatically detects missing dependencies and installs them on first launch (with your confirmation). No manual `pip install` needed.
+
+To use the custom taskbar icon, first build the launcher:
+
+```bash
+python build.py
+```
+
+Then launch with **`TalkTrack.exe main.py`** or use `start.bat` (which uses the exe automatically if present).
 
 For troubleshooting, use **`start_debug.bat`** which shows a console window with log output.
 
@@ -187,16 +202,24 @@ Access via the gear icon or **Edit > Settings**:
 | Diarization | Enabled/Disabled, min/max speakers | Disabled |
 | AI Provider | None, Claude, OpenAI, Grok, Gemini, Mistral, Local | None |
 | AI Model | Provider-specific model list | Varies |
+| Min Duration | Skip transcription for recordings under N seconds | 10s |
+| Hidden Devices | Filter out unwanted audio devices by keyword | None |
 
 ## Project Structure
 
 ```
 TalkTrack/
   main.py                    # Entry point, logging, crash handling
+  build.py                   # Build TalkTrack.exe launcher with custom icon
   start.bat                  # Launcher (auto-installs dependencies)
   start_debug.bat            # Debug launcher with console output
   requirements.txt           # Dependencies
-  resources/style.qss        # Dark theme stylesheet
+  resources/
+    style.qss                # Dark theme stylesheet
+    talktrack.ico             # App icon (multi-size)
+    build_ico.py              # Rebuild .ico from source PNGs
+    TT_icon_*.png             # Icon source files (32-512px)
+    TT_logo_*.png             # Logo files for branding
   app/
     main_window.py           # Main window + orchestration
     audio/
