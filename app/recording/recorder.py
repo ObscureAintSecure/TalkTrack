@@ -25,6 +25,7 @@ class Recorder(QObject):
     state_changed = pyqtSignal(RecordingState)
     time_updated = pyqtSignal(float)
     recording_finished = pyqtSignal(dict)
+    recording_discarded = pyqtSignal(float)  # duration of discarded recording
     error_occurred = pyqtSignal(str)
     mic_level = pyqtSignal(object)
     system_level = pyqtSignal(object)
@@ -111,9 +112,24 @@ class Recorder(QObject):
         try:
             audio_files = self._capture.stop()
 
+            duration = self._capture.get_elapsed_time()
             self._current_session["stopped_at"] = datetime.now().isoformat()
-            self._current_session["duration"] = self._capture.get_elapsed_time()
+            self._current_session["duration"] = duration
             self._current_session["audio_files"] = audio_files
+
+            # Check min recording length — discard if too short
+            min_length = self.config.get("general", "min_recording_length")
+            if min_length and duration < min_length:
+                # Delete the session directory
+                import shutil
+                session_dir = self._current_session["directory"]
+                try:
+                    shutil.rmtree(session_dir)
+                except OSError:
+                    pass
+                self._set_state(RecordingState.IDLE)
+                self.recording_discarded.emit(duration)
+                return
 
             # Convert to output format if needed
             output_format = self.config.get("output", "format")

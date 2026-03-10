@@ -68,6 +68,8 @@ class SourceSelector(QWidget):
     devices_changed = pyqtSignal()
     # Emitted when all checked apps go inactive during recording
     apps_went_inactive = pyqtSignal()
+    # Emitted when a checked app becomes active (for auto-record)
+    apps_became_active = pyqtSignal()
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -249,6 +251,9 @@ class SourceSelector(QWidget):
         # Detect transition: checked apps were active, now all inactive
         if checked_names and self._had_active_apps and not any_checked_active:
             self.apps_went_inactive.emit()
+        # Detect transition: no checked apps were active, now at least one is
+        if checked_names and not self._had_active_apps and any_checked_active:
+            self.apps_became_active.emit()
         self._had_active_apps = any_checked_active
 
     def refresh_devices(self):

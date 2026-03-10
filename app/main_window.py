@@ -195,6 +195,7 @@ class MainWindow(QMainWindow):
         self.recorder.state_changed.connect(self._on_state_changed)
         self.recorder.time_updated.connect(self.recording_controls.update_time)
         self.recorder.recording_finished.connect(self._on_recording_finished)
+        self.recorder.recording_discarded.connect(self._on_recording_discarded)
         self.recorder.error_occurred.connect(self._on_error)
         self.recorder.mic_level.connect(self.recording_controls.update_mic_level)
         self.recorder.mic_level.connect(self.waveform.append_audio)
@@ -210,8 +211,9 @@ class MainWindow(QMainWindow):
         self.recordings_list.recording_deleted.connect(self._on_recording_deleted)
         self.recordings_list.search_result_selected.connect(self._on_search_result_selected)
 
-        # Auto-stop when call ends
+        # Auto-stop when call ends / auto-start when call begins
         self.source_selector.apps_went_inactive.connect(self._on_apps_went_inactive)
+        self.source_selector.apps_became_active.connect(self._on_apps_became_active)
 
         # Recording header
         self.recording_header.name_changed.connect(self._on_recording_renamed)
@@ -279,6 +281,24 @@ class MainWindow(QMainWindow):
             if self.source_selector.is_per_app_mode():
                 self.status_label.setText("Call ended — stopping recording...")
                 self.recorder.stop_recording()
+
+    def _on_apps_became_active(self):
+        """Auto-start recording when a checked app starts a call."""
+        if self.recorder.state != RecordingState.IDLE:
+            return
+        if not self.config.get("general", "auto_record"):
+            return
+        if not self.source_selector.is_per_app_mode():
+            return
+        self.status_label.setText("Call detected — auto-recording...")
+        self._start_recording()
+
+    def _on_recording_discarded(self, duration):
+        """Handle recording discarded due to min length."""
+        min_len = self.config.get("general", "min_recording_length")
+        self.status_label.setText(
+            f"Recording discarded ({duration:.0f}s < {min_len}s minimum)"
+        )
 
     def _on_state_changed(self, state):
         self.recording_controls.set_state(state)

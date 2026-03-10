@@ -370,6 +370,41 @@ QSpinBox {
     border: 1px solid #45475a;
     border-radius: 6px;
     padding: 4px 8px;
+    padding-right: 20px;
+}
+
+QSpinBox::up-button, QSpinBox::down-button {
+    background-color: #45475a;
+    border: none;
+    width: 18px;
+}
+
+QSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    border-top-right-radius: 5px;
+}
+
+QSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: 5px;
+}
+
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+    background-color: #585b70;
+}
+
+QSpinBox::up-arrow {
+    image: url(resources/arrow_up.png);
+    width: 8px;
+    height: 8px;
+}
+
+QSpinBox::down-arrow {
+    image: url(resources/arrow_down.png);
+    width: 8px;
+    height: 8px;
 }
 
 /* Check Box */

@@ -39,6 +39,10 @@ DEFAULT_CONFIG = {
         "auto_summarize": True,
         "provider_settings": {},
     },
+    "general": {
+        "min_recording_length": 5,
+        "auto_record": False,
+    },
     "ui": {
         "theme": "dark",
     },

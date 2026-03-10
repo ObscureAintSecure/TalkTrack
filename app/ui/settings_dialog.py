@@ -22,6 +22,36 @@ class SettingsDialog(QDialog):
 
         tabs = QTabWidget()
 
+        # General Tab
+        general_tab = QWidget()
+        general_layout = QVBoxLayout(general_tab)
+
+        recording_group = QGroupBox("Recording")
+        recording_form = QFormLayout(recording_group)
+
+        self.min_recording_spin = QSpinBox()
+        self.min_recording_spin.setRange(0, 300)
+        self.min_recording_spin.setSuffix(" seconds")
+        self.min_recording_spin.setSpecialValueText("Keep all recordings")
+        self.min_recording_spin.setToolTip(
+            "Automatically discard recordings shorter than this duration.\n"
+            "Set to 0 to keep all recordings regardless of length."
+        )
+        recording_form.addRow("Min recording length:", self.min_recording_spin)
+
+        self.auto_record_cb = QCheckBox("Auto-record when selected app starts a call")
+        self.auto_record_cb.setToolTip(
+            "Automatically start recording when a checked app in the\n"
+            "per-app picker becomes active (joins a call).\n"
+            "Requires per-app capture mode on Windows 11."
+        )
+        recording_form.addRow(self.auto_record_cb)
+
+        general_layout.addWidget(recording_group)
+        general_layout.addStretch()
+
+        tabs.addTab(general_tab, "General")
+
         # Audio Tab
         audio_tab = QWidget()
         audio_layout = QVBoxLayout(audio_tab)
@@ -272,6 +302,11 @@ class SettingsDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _load_settings(self):
+        # General
+        min_rec = self.config.get("general", "min_recording_length")
+        self.min_recording_spin.setValue(min_rec if min_rec else 0)
+        self.auto_record_cb.setChecked(self.config.get("general", "auto_record"))
+
         # Audio
         sr = self.config.get("audio", "sample_rate")
         idx = self.sample_rate_combo.findData(sr)
@@ -348,6 +383,9 @@ class SettingsDialog(QDialog):
         self._on_ai_provider_changed(self.ai_provider_combo.currentIndex())
 
     def _save_and_close(self):
+        self.config.set("general", "min_recording_length", self.min_recording_spin.value())
+        self.config.set("general", "auto_record", self.auto_record_cb.isChecked())
+
         self.config.set("audio", "sample_rate", self.sample_rate_combo.currentData())
         self.config.set("audio", "channels", self.channels_combo.currentData())
 

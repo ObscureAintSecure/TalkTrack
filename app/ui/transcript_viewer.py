@@ -50,6 +50,7 @@ class TranscriptViewer(QWidget):
         self._audio_path = None
         self._player = None
         self._playing_index = -1
+        self._continuous_play = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -133,8 +134,15 @@ class TranscriptViewer(QWidget):
 
         layout.addWidget(self.scroll_area, 1)
 
-        # Export buttons
+        # Bottom row: play all + export buttons
         export_row = QHBoxLayout()
+
+        self.play_all_btn = QPushButton("\u25b6 Play All")
+        self.play_all_btn.setEnabled(False)
+        self.play_all_btn.setFixedWidth(90)
+        self.play_all_btn.clicked.connect(self._on_play_all_clicked)
+        export_row.addWidget(self.play_all_btn)
+
         export_row.addStretch()
 
         self.export_txt_btn = QPushButton("Export TXT")
@@ -242,10 +250,11 @@ class TranscriptViewer(QWidget):
         # Update speaker panel
         self.speaker_panel.set_speakers(transcript.segments, self._speaker_names)
 
-        # Enable export buttons
+        # Enable export and playback buttons
         self.export_txt_btn.setEnabled(True)
         self.export_srt_btn.setEnabled(True)
         self.export_json_btn.setEnabled(True)
+        self.play_all_btn.setEnabled(self._audio_path is not None)
 
     def clear(self):
         """Clear all transcript data and reset to empty state."""
@@ -273,11 +282,13 @@ class TranscriptViewer(QWidget):
         self._segments_layout.addWidget(self._placeholder)
         self._segments_layout.addStretch()
 
-        # Disable export and transcribe buttons
+        # Disable export, playback, and transcribe buttons
         self.export_txt_btn.setEnabled(False)
         self.export_srt_btn.setEnabled(False)
         self.export_json_btn.setEnabled(False)
+        self.play_all_btn.setEnabled(False)
         self.transcribe_btn.setEnabled(False)
+        self._stop_continuous_play()
 
         # Clear speaker panel
         self.speaker_panel.set_speakers([], {})
@@ -290,14 +301,75 @@ class TranscriptViewer(QWidget):
 
     # --- Audio playback ---
 
+    def _on_play_all_clicked(self):
+        if self._continuous_play:
+            self._stop_continuous_play()
+            return
+        if not self._audio_path or not self._transcript:
+            return
+        self._start_continuous_play(0)
+
+    def _start_continuous_play(self, from_index):
+        """Start playing all segments sequentially from the given index."""
+        self._continuous_play = True
+        self.play_all_btn.setText("\u23f9 Stop")
+        self._play_segment_at(from_index)
+
+    def _stop_continuous_play(self):
+        """Stop continuous playback."""
+        self._continuous_play = False
+        self.play_all_btn.setText("\u25b6 Play All")
+        if self._player:
+            self._player.stop()
+        self._clear_highlight()
+        self._playing_index = -1
+
+    def _play_segment_at(self, index):
+        """Play a specific segment and highlight it."""
+        if not self._audio_path or not self._transcript:
+            return
+        if index >= len(self._transcript.segments):
+            self._stop_continuous_play()
+            return
+
+        self._ensure_player()
+        self._clear_highlight()
+
+        seg = self._transcript.segments[index]
+        self._player.play_segment(self._audio_path, seg.start, seg.end)
+        self._playing_index = index
+        self._segment_widgets[index].set_playing(True)
+        self._set_highlight(index)
+
+        # Scroll to the playing segment
+        self.scroll_area.ensureWidgetVisible(self._segment_widgets[index], 50, 50)
+
+    def _set_highlight(self, index):
+        """Highlight the currently playing segment."""
+        if 0 <= index < len(self._segment_widgets):
+            self._segment_widgets[index].setStyleSheet(
+                "background-color: #313244; border-radius: 4px;"
+            )
+
+    def _clear_highlight(self):
+        """Remove highlight from all segments."""
+        if self._playing_index >= 0 and self._playing_index < len(self._segment_widgets):
+            self._segment_widgets[self._playing_index].setStyleSheet("")
+            self._segment_widgets[self._playing_index].set_playing(False)
+
     def _on_play_requested(self, index):
         if not self._audio_path:
             return
         self._ensure_player()
 
+        # If clicking a segment during continuous play, jump to that segment
+        if self._continuous_play:
+            self._clear_highlight()
+            self._play_segment_at(index)
+            return
+
         # Stop previous
-        if self._playing_index >= 0 and self._playing_index < len(self._segment_widgets):
-            self._segment_widgets[self._playing_index].set_playing(False)
+        self._clear_highlight()
 
         seg = self._transcript.segments[index]
         self._player.play_segment(self._audio_path, seg.start, seg.end)
@@ -305,15 +377,26 @@ class TranscriptViewer(QWidget):
         self._segment_widgets[index].set_playing(True)
 
     def _on_stop_requested(self):
+        if self._continuous_play:
+            self._stop_continuous_play()
+            return
         if self._player:
             self._player.stop()
-        if self._playing_index >= 0 and self._playing_index < len(self._segment_widgets):
-            self._segment_widgets[self._playing_index].set_playing(False)
+        self._clear_highlight()
         self._playing_index = -1
 
     def _on_playback_finished(self):
-        if self._playing_index >= 0 and self._playing_index < len(self._segment_widgets):
-            self._segment_widgets[self._playing_index].set_playing(False)
+        if self._continuous_play and self._playing_index >= 0:
+            # Advance to next segment
+            next_index = self._playing_index + 1
+            self._clear_highlight()
+            if next_index < len(self._segment_widgets):
+                self._play_segment_at(next_index)
+            else:
+                self._stop_continuous_play()
+            return
+
+        self._clear_highlight()
         self._playing_index = -1
 
     # --- Text editing ---
