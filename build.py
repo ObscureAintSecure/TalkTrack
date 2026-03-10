@@ -1,126 +1,129 @@
-"""Build TalkTrack.exe — copy pythonw.exe and replace its icon.
+"""Build TalkTrack.exe — a lightweight launcher (~1.6 MB) with the custom icon.
 
-The result is a ~170 KB exe that IS Python, just with the TalkTrack icon.
-Launch with: TalkTrack.exe main.py
+Double-click TalkTrack.exe to launch the app. It finds system Python
+and runs main.py automatically. No bundled dependencies.
 
 Usage: python build.py
+Requires: pip install pyinstaller
 """
-import ctypes
-import ctypes.wintypes
+import subprocess
 import shutil
-import struct
 import sys
 from pathlib import Path
 
 APP_DIR = Path(__file__).parent.resolve()
-ICO_PATH = APP_DIR / "resources" / "talktrack.ico"
-EXE_PATH = APP_DIR / "TalkTrack.exe"
+ICON = APP_DIR / "resources" / "talktrack.ico"
+
+LAUNCHER_CODE = """\
+# -*- coding: utf-8 -*-
+\"\"\"TalkTrack launcher - finds system Python and runs main.py.\"\"\"
+import os
+import sys
+import shutil
+import subprocess
 
 
-def find_real_pythonw():
-    """Find the real pythonw.exe (not the 0-byte MS Store alias)."""
-    real = Path(sys.base_prefix) / "pythonw.exe"
-    if real.exists() and real.stat().st_size > 0:
-        return real
-    # Fallback: check next to sys.executable
-    alt = Path(sys.executable).parent / "pythonw.exe"
-    if alt.exists() and alt.stat().st_size > 0:
-        return alt
+def find_pythonw():
+    \"\"\"Find the system pythonw.exe (not this exe).\"\"\"
+    pythonw = shutil.which("pythonw")
+    if pythonw:
+        return pythonw
+    python = shutil.which("python")
+    if python:
+        candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
+        if os.path.exists(candidate):
+            return candidate
+        return python
     return None
 
 
-def replace_icon(exe_path, ico_path):
-    """Replace the icon in an exe using Win32 UpdateResource API."""
-    # Read ICO file
-    ico_data = ico_path.read_bytes()
-    # Parse ICO header
-    _reserved, ico_type, num_images = struct.unpack_from("<HHH", ico_data, 0)
-    if ico_type != 1:
-        raise ValueError("Not a valid ICO file")
+def main():
+    exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    main_py = os.path.join(exe_dir, "main.py")
 
-    # Parse ICO directory entries
-    entries = []
-    for i in range(num_images):
-        offset = 6 + i * 16
-        width, height, colors, _reserved, planes, bpp, data_size, data_offset = \
-            struct.unpack_from("<BBBBHHII", ico_data, offset)
-        png_data = ico_data[data_offset:data_offset + data_size]
-        entries.append((width, height, colors, planes, bpp, data_size, png_data))
-
-    # Win32 API functions
-    BeginUpdateResource = ctypes.windll.kernel32.BeginUpdateResourceW
-    UpdateResource = ctypes.windll.kernel32.UpdateResourceW
-    EndUpdateResource = ctypes.windll.kernel32.EndUpdateResourceW
-
-    BeginUpdateResource.argtypes = [ctypes.c_wchar_p, ctypes.c_bool]
-    BeginUpdateResource.restype = ctypes.wintypes.HANDLE
-
-    UpdateResource.argtypes = [
-        ctypes.wintypes.HANDLE, ctypes.c_void_p, ctypes.c_void_p,
-        ctypes.wintypes.WORD, ctypes.c_void_p, ctypes.wintypes.DWORD
-    ]
-    UpdateResource.restype = ctypes.c_bool
-
-    EndUpdateResource.argtypes = [ctypes.wintypes.HANDLE, ctypes.c_bool]
-    EndUpdateResource.restype = ctypes.c_bool
-
-    RT_ICON = 3
-    RT_GROUP_ICON = 14
-    LANG_NEUTRAL = 0
-
-    handle = BeginUpdateResource(str(exe_path), False)
-    if not handle:
-        raise OSError(f"BeginUpdateResource failed (error {ctypes.GetLastError()})")
-
-    # Write each icon image as RT_ICON resource (IDs starting at 1)
-    for i, (width, height, colors, planes, bpp, data_size, png_data) in enumerate(entries):
-        icon_id = i + 1
-        ok = UpdateResource(
-            handle, RT_ICON, icon_id, LANG_NEUTRAL,
-            png_data, len(png_data)
+    if not os.path.exists(main_py):
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            0, "Cannot find main.py in:\\\\n" + exe_dir, "TalkTrack", 0x10
         )
-        if not ok:
-            EndUpdateResource(handle, True)
-            raise OSError(f"UpdateResource RT_ICON failed (error {ctypes.GetLastError()})")
+        sys.exit(1)
 
-    # Build GRPICONDIR structure for RT_GROUP_ICON
-    grp_header = struct.pack("<HHH", 0, 1, num_images)
-    grp_entries = b""
-    for i, (width, height, colors, planes, bpp, data_size, _) in enumerate(entries):
-        # GRPICONDIRENTRY: same as ICONDIRENTRY but last field is ID not offset
-        grp_entries += struct.pack("<BBBBHHIH",
-            width, height, colors, 0, planes, bpp, data_size, i + 1)
+    pythonw = find_pythonw()
+    if not pythonw:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            0, "Cannot find Python. Please install Python 3.10+.", "TalkTrack", 0x10
+        )
+        sys.exit(1)
 
-    grp_data = grp_header + grp_entries
-    ok = UpdateResource(
-        handle, RT_GROUP_ICON, 1, LANG_NEUTRAL,
-        grp_data, len(grp_data)
-    )
-    if not ok:
-        EndUpdateResource(handle, True)
-        raise OSError(f"UpdateResource RT_GROUP_ICON failed (error {ctypes.GetLastError()})")
+    subprocess.Popen([pythonw, main_py], cwd=exe_dir)
 
-    if not EndUpdateResource(handle, False):
-        raise OSError(f"EndUpdateResource failed (error {ctypes.GetLastError()})")
+
+if __name__ == "__main__":
+    main()
+"""
+
+# Heavy modules to exclude (launcher only needs os, sys, shutil, subprocess)
+EXCLUDES = [
+    "torch", "PyQt6", "numpy", "scipy", "pyannote", "transformers",
+    "faster_whisper", "sounddevice", "pydub", "comtypes", "psutil",
+    "pycaw", "win32com", "yt_dlp", "torchaudio", "sentence_transformers",
+]
 
 
 def build():
-    pythonw = find_real_pythonw()
-    if not pythonw:
-        print("Error: Cannot find pythonw.exe")
-        sys.exit(1)
+    launcher = APP_DIR / "launcher.py"
+    launcher.write_text(LAUNCHER_CODE, encoding="utf-8")
 
-    print(f"Source: {pythonw} ({pythonw.stat().st_size // 1024} KB)")
+    try:
+        cmd = [
+            sys.executable, "-m", "PyInstaller",
+            "--name", "TalkTrack",
+            "--onedir",
+            "--noconsole",
+            "--icon", str(ICON),
+            "--distpath", str(APP_DIR),
+        ]
+        for mod in EXCLUDES:
+            cmd.extend(["--exclude-module", mod])
+        cmd.append(str(launcher))
 
-    # Copy pythonw.exe -> TalkTrack.exe
-    shutil.copy2(pythonw, EXE_PATH)
+        print("Building TalkTrack.exe (lightweight launcher) ...")
+        result = subprocess.run(cmd, cwd=str(APP_DIR))
 
-    # Replace the icon
-    replace_icon(EXE_PATH, ICO_PATH)
+        if result.returncode != 0:
+            print("\nBuild failed.")
+            sys.exit(1)
 
-    size_kb = EXE_PATH.stat().st_size / 1024
-    print(f"Built: {EXE_PATH} ({size_kb:.0f} KB)")
-    print(f"Launch with: TalkTrack.exe main.py")
+        # Move exe and _internal to project root
+        build_dir = APP_DIR / "TalkTrack"
+        exe_src = build_dir / "TalkTrack.exe"
+        internal_src = build_dir / "_internal"
+
+        exe_dst = APP_DIR / "TalkTrack.exe"
+        internal_dst = APP_DIR / "_internal"
+
+        # Clean previous build
+        if exe_dst.exists():
+            exe_dst.unlink()
+        if internal_dst.exists():
+            shutil.rmtree(internal_dst)
+
+        shutil.move(str(exe_src), str(exe_dst))
+        shutil.move(str(internal_src), str(internal_dst))
+
+        size_mb = exe_dst.stat().st_size / (1024 * 1024)
+        print(f"\nBuild successful: {exe_dst} ({size_mb:.1f} MB)")
+        print("Double-click TalkTrack.exe to launch the app.")
+    finally:
+        # Clean up build artifacts
+        launcher.unlink(missing_ok=True)
+        for name in ["TalkTrack", "build", "TalkTrack.spec"]:
+            target = APP_DIR / name
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            elif target.is_file():
+                target.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
