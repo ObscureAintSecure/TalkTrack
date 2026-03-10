@@ -10,6 +10,8 @@ DEFAULT_CONFIG = {
         "mic_device": None,
         "loopback_device": None,
         "capture_mode": "legacy",
+        "selected_apps": [],
+        "hidden_devices": [],
     },
     "output": {
         "directory": str(Path(__file__).parent.parent.parent / "recordings"),
@@ -20,6 +22,7 @@ DEFAULT_CONFIG = {
         "model_size": "base",
         "language": None,
         "device": "cpu",
+        "min_duration": 10,
     },
     "diarization": {
         "enabled": True,
@@ -34,6 +37,7 @@ DEFAULT_CONFIG = {
         "local_model_path": "",
         "embed_model": "all-MiniLM-L6-v2",
         "auto_summarize": True,
+        "provider_settings": {},
     },
     "ui": {
         "theme": "dark",

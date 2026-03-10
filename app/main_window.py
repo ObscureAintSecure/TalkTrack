@@ -132,7 +132,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.waveform)
 
         # Audio sources (collapsible)
-        self.source_selector = SourceSelector()
+        self.source_selector = SourceSelector(config=self.config)
         left_layout.addWidget(self.source_selector, 1)
 
         # Recordings list
@@ -199,12 +199,15 @@ class MainWindow(QMainWindow):
         self.recorder.mic_level.connect(self.recording_controls.update_mic_level)
         self.recorder.mic_level.connect(self.waveform.append_audio)
         self.recorder.system_level.connect(self.recording_controls.update_system_level)
+        self.recorder.system_level.connect(self.waveform.append_system_audio)
 
         # Transcript
         self.transcript_viewer.transcribe_requested.connect(self._start_transcription)
+        self.transcript_viewer.cancel_requested.connect(self._cancel_transcription)
 
         # Recordings list
         self.recordings_list.recording_selected.connect(self._on_recording_selected)
+        self.recordings_list.recording_deleted.connect(self._on_recording_deleted)
         self.recordings_list.search_result_selected.connect(self._on_search_result_selected)
 
         # Auto-stop when call ends
@@ -244,6 +247,9 @@ class MainWindow(QMainWindow):
                 "or switch to 'Capture all system audio' mode."
             )
             return
+
+        # Save capture settings for next session
+        self.source_selector.save_capture_settings()
 
         self.recorder.start_recording(
             mic_device=mic,
@@ -292,9 +298,15 @@ class MainWindow(QMainWindow):
 
     def _on_recording_finished(self, session):
         self._current_session = session
+        self._transcript = None
         self.status_label.setText("Recording saved.")
 
-        # Set up transcript viewer
+        # Clear previous recording's view
+        self.transcript_viewer.clear()
+        self.summary_panel.clear()
+        self.action_items_panel.clear()
+
+        # Set up transcript viewer for new recording
         audio_files = session.get("audio_files", {})
         combined = audio_files.get("combined")
         system = audio_files.get("system")
@@ -316,9 +328,16 @@ class MainWindow(QMainWindow):
         # Update recording header
         self.recording_header.set_recording(session)
 
-        # Auto-start transcription if audio available
-        if audio_for_transcript:
+        # Auto-start transcription if audio available and long enough
+        duration = session.get("duration", 0)
+        min_duration = self.config.get("transcription", "min_duration")
+        if audio_for_transcript and duration >= min_duration:
             self._start_transcription(audio_for_transcript)
+        elif audio_for_transcript:
+            self.status_label.setText(
+                f"Recording too short ({duration:.0f}s < {min_duration}s) — "
+                "skipping auto-transcription. Use Transcribe button to transcribe manually."
+            )
 
     def _start_transcription(self, audio_path):
         if self._transcription_worker and self._transcription_worker.isRunning():
@@ -337,10 +356,20 @@ class MainWindow(QMainWindow):
         self._transcription_worker.progress.connect(self._on_transcription_progress)
         self._transcription_worker.finished.connect(self._on_transcription_finished)
         self._transcription_worker.error.connect(self._on_transcription_error)
+        self._transcription_worker.cancelled.connect(self._on_transcription_cancelled)
         self._transcription_worker.start()
 
         self.transcript_viewer.show_progress("Starting transcription...")
         self.status_label.setText("Transcribing...")
+
+    def _cancel_transcription(self):
+        if self._transcription_worker and self._transcription_worker.isRunning():
+            self._transcription_worker.cancel()
+            self.transcript_viewer.show_progress("Cancelling...")
+
+    def _on_transcription_cancelled(self):
+        self.transcript_viewer.hide_progress()
+        self.status_label.setText("Transcription cancelled.")
 
     def _on_transcription_progress(self, message):
         self.transcript_viewer.show_progress(message)
@@ -436,6 +465,8 @@ class MainWindow(QMainWindow):
 
         # Auto-summarize if AI provider configured
         self._transcript = result
+        self.summary_panel.set_ready()
+        self.action_items_panel.set_ready()
         self._maybe_auto_summarize()
 
         # Update chat panel context
@@ -445,6 +476,17 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.hide_progress()
         self.status_label.setText("Transcription failed.")
         QMessageBox.warning(self, "Transcription Error", error_msg)
+
+    def _on_recording_deleted(self, directory):
+        """Clear UI if the deleted recording was currently loaded."""
+        if self._current_session and self._current_session.get("directory") == directory:
+            self._current_session = None
+            self._transcript = None
+            self.transcript_viewer.clear()
+            self.recording_header.clear()
+            self.summary_panel.clear()
+            self.action_items_panel.clear()
+            self.status_label.setText("Recording deleted.")
 
     def _on_recording_selected(self, metadata):
         """Load a past recording for viewing/transcription."""
@@ -507,6 +549,11 @@ class MainWindow(QMainWindow):
                     self.action_items_panel.set_items(json.load(f))
             except (json.JSONDecodeError, OSError):
                 pass
+
+        # Show generate buttons if transcript loaded but no summary/actions yet
+        if hasattr(self, '_transcript') and self._transcript is not None:
+            self.summary_panel.set_ready()
+            self.action_items_panel.set_ready()
 
         # Update chat panel context for loaded recording
         self.chat_panel.set_session_dir(metadata["directory"])
@@ -595,6 +642,8 @@ class MainWindow(QMainWindow):
             # Update recordings list with potentially new directory
             self.recordings_list.recordings_dir = Path(self.config.get("output", "directory"))
             self.recordings_list.refresh()
+            # Refresh devices in case hidden devices changed
+            self.source_selector.refresh_devices()
 
     def _open_recordings_folder(self):
         import os
@@ -692,19 +741,20 @@ class MainWindow(QMainWindow):
             actions_ready = pyqtSignal(list)
             error = pyqtSignal(str)
 
-            def __init__(self, provider, segments, speaker_names):
+            def __init__(self, provider, segments, speaker_names, notes=""):
                 super().__init__()
                 self._provider = provider
                 self._segments = segments
                 self._names = speaker_names
+                self._notes = notes
 
             def run(self):
                 try:
-                    summary_prompt = build_summary_prompt(self._segments, self._names)
+                    summary_prompt = build_summary_prompt(self._segments, self._names, self._notes)
                     summary = self._provider.complete(summary_prompt)
                     self.summary_ready.emit(summary)
 
-                    actions_prompt = build_action_items_prompt(self._segments, self._names)
+                    actions_prompt = build_action_items_prompt(self._segments, self._names, self._notes)
                     actions_response = self._provider.complete(actions_prompt)
                     actions = parse_action_items(actions_response)
                     self.actions_ready.emit(actions)
@@ -712,7 +762,8 @@ class MainWindow(QMainWindow):
                     self.error.emit(str(e))
 
         speaker_names = self.transcript_viewer._speaker_names
-        self._summarize_worker = SummarizeWorker(provider, self._transcript.segments, speaker_names)
+        notes = self.notes_panel.get_text()
+        self._summarize_worker = SummarizeWorker(provider, self._transcript.segments, speaker_names, notes)
         self._summarize_worker.summary_ready.connect(self._on_summary_ready)
         self._summarize_worker.actions_ready.connect(self._on_actions_ready)
         self._summarize_worker.error.connect(lambda e: self.status_label.setText(f"AI error: {e}"))

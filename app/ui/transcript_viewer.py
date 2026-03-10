@@ -37,6 +37,7 @@ class TranscriptViewer(QWidget):
     """
 
     transcribe_requested = pyqtSignal(str)  # audio file path
+    cancel_requested = pyqtSignal()         # emitted when cancel button clicked
     transcript_changed = pyqtSignal()       # emitted when text or names change
     speaker_names_changed = pyqtSignal(dict)  # emitted when speaker names change
 
@@ -70,11 +71,19 @@ class TranscriptViewer(QWidget):
 
         layout.addLayout(header)
 
-        # Progress
+        # Progress row (bar + cancel button)
+        progress_row = QHBoxLayout()
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)  # indeterminate
         self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
+        progress_row.addWidget(self.progress_bar)
+
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(70)
+        self.cancel_btn.hide()
+        self.cancel_btn.clicked.connect(self._on_cancel_clicked)
+        progress_row.addWidget(self.cancel_btn)
+        layout.addLayout(progress_row)
 
         self.status_label = QLabel("")
         self.status_label.hide()
@@ -169,12 +178,17 @@ class TranscriptViewer(QWidget):
 
     def show_progress(self, message):
         self.progress_bar.show()
+        self.cancel_btn.show()
         self.status_label.setText(message)
         self.status_label.show()
 
     def hide_progress(self):
         self.progress_bar.hide()
+        self.cancel_btn.hide()
         self.status_label.hide()
+
+    def _on_cancel_clicked(self):
+        self.cancel_requested.emit()
 
     def display_transcript(self, transcript, speaker_names=None):
         """Render transcript with interactive segment widgets."""
@@ -232,6 +246,41 @@ class TranscriptViewer(QWidget):
         self.export_txt_btn.setEnabled(True)
         self.export_srt_btn.setEnabled(True)
         self.export_json_btn.setEnabled(True)
+
+    def clear(self):
+        """Clear all transcript data and reset to empty state."""
+        if self._player:
+            self._player.stop()
+        self._playing_index = -1
+        self._transcript = None
+        self._speaker_colors = {}
+        self._speaker_names = {}
+        self._audio_path = None
+
+        # Remove segment widgets
+        self._segment_widgets.clear()
+        while self._segments_layout.count():
+            item = self._segments_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Restore placeholder
+        self._placeholder = QLabel(
+            "Transcript will appear here after recording and transcription..."
+        )
+        self._placeholder.setStyleSheet("color: #585b70; padding: 20px;")
+        self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._segments_layout.addWidget(self._placeholder)
+        self._segments_layout.addStretch()
+
+        # Disable export and transcribe buttons
+        self.export_txt_btn.setEnabled(False)
+        self.export_srt_btn.setEnabled(False)
+        self.export_json_btn.setEnabled(False)
+        self.transcribe_btn.setEnabled(False)
+
+        # Clear speaker panel
+        self.speaker_panel.set_speakers([], {})
 
     def get_speaker_count(self):
         """Return number of unique speakers in current transcript."""

@@ -1,12 +1,25 @@
 import sounddevice as sd
 
 
-def get_input_devices():
+def _is_hidden(name, hidden_devices):
+    """Check if a device name matches any hidden device pattern (case-insensitive)."""
+    if not hidden_devices:
+        return False
+    name_lower = name.lower()
+    for pattern in hidden_devices:
+        if pattern.lower() in name_lower:
+            return True
+    return False
+
+
+def get_input_devices(hidden_devices=None):
     """Return list of audio input (microphone) devices."""
     devices = sd.query_devices()
     inputs = []
     for i, dev in enumerate(devices):
         if dev["max_input_channels"] > 0:
+            if _is_hidden(dev["name"], hidden_devices):
+                continue
             inputs.append({
                 "index": i,
                 "name": dev["name"],
@@ -35,22 +48,31 @@ def get_loopback_devices():
     return loopbacks
 
 
-def get_wasapi_output_devices():
-    """Return WASAPI output devices that can be used for loopback recording."""
+def get_system_audio_devices(hidden_devices=None):
+    """Return WASAPI output devices for system audio loopback capture.
+
+    These are speakers/headphone output devices. PyAudioWPatch automatically
+    finds the corresponding loopback input device by name matching.
+    """
     devices = sd.query_devices()
     outputs = []
     for i, dev in enumerate(devices):
         hostapi = sd.query_hostapis(dev["hostapi"])
         if hostapi["name"] == "Windows WASAPI" and dev["max_output_channels"] > 0:
+            if _is_hidden(dev["name"], hidden_devices):
+                continue
             outputs.append({
                 "index": i,
                 "name": dev["name"],
                 "channels": dev["max_output_channels"],
                 "sample_rate": dev["default_samplerate"],
                 "hostapi": "WASAPI",
-                "is_loopback_capable": True,
             })
     return outputs
+
+
+# Keep old name as alias
+get_wasapi_output_devices = get_system_audio_devices
 
 
 def get_default_mic():
@@ -63,9 +85,22 @@ def get_default_mic():
 
 
 def get_default_output():
-    """Return the default output device index (for loopback)."""
+    """Return the default output device index (for loopback).
+
+    sd.default.device[1] returns a DirectSound/MME index which doesn't match
+    WASAPI device indices. We match by name instead to find the corresponding
+    WASAPI output device.
+    """
     try:
-        return sd.default.device[1]
+        default_idx = sd.default.device[1]
+        if default_idx is not None and default_idx >= 0:
+            default_info = sd.query_devices(default_idx)
+            default_name = default_info["name"]
+            # Find the matching WASAPI output device by name
+            for dev in get_system_audio_devices():
+                if dev["name"] == default_name:
+                    return dev["index"]
     except Exception:
-        outputs = get_wasapi_output_devices()
-        return outputs[0]["index"] if outputs else None
+        pass
+    outputs = get_system_audio_devices()
+    return outputs[0]["index"] if outputs else None

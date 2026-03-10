@@ -35,4 +35,8 @@ if errorlevel 1 (
     pip install -r requirements.txt --quiet >nul 2>&1
 )
 
-start "" pythonw main.py
+if exist TalkTrack.exe (
+    start "" TalkTrack.exe main.py
+) else (
+    start "" pythonw main.py
+)

@@ -5,7 +5,19 @@ import logging.handlers
 import platform
 import traceback
 import warnings
+import ctypes
 from pathlib import Path
+
+# Set Windows AppUserModelID so the taskbar shows our icon, not Python's.
+# Must be called before QApplication is created. Uses explicit arg/res types
+# to ensure the wide string is passed correctly.
+try:
+    _SetAppID = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID
+    _SetAppID.argtypes = [ctypes.c_wchar_p]
+    _SetAppID.restype = ctypes.HRESULT
+    _SetAppID("TalkTrack.TalkTrack.1")
+except Exception:
+    pass
 
 # --- Logging setup (before anything else) ---
 LOG_DIR = Path.home() / ".talktrack"
@@ -163,6 +175,12 @@ def main():
     app.setApplicationName("TalkTrack")
     app.setOrganizationName("TalkTrack")
 
+    # Set app icon
+    from PyQt6.QtGui import QIcon
+    icon_path = Path(__file__).parent / "resources" / "talktrack.ico"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
+
     # Install global exception handler
     sys.excepthook = _exception_handler
 
@@ -172,7 +190,32 @@ def main():
         app.setStyleSheet(stylesheet)
 
     window = MainWindow()
+    if icon_path.exists():
+        window.setWindowIcon(QIcon(str(icon_path)))
     window.show()
+
+    # Force taskbar icon via Win32 API (needed for Microsoft Store Python)
+    if icon_path.exists():
+        try:
+            WM_SETICON = 0x0080
+            IMAGE_ICON = 1
+            LR_LOADFROMFILE = 0x0010
+            LR_DEFAULTSIZE = 0x0040
+            hwnd = int(window.winId())
+            hicon_big = ctypes.windll.user32.LoadImageW(
+                None, str(icon_path), IMAGE_ICON, 48, 48,
+                LR_LOADFROMFILE,
+            )
+            hicon_small = ctypes.windll.user32.LoadImageW(
+                None, str(icon_path), IMAGE_ICON, 16, 16,
+                LR_LOADFROMFILE,
+            )
+            if hicon_big:
+                ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 1, hicon_big)
+            if hicon_small:
+                ctypes.windll.user32.SendMessageW(hwnd, WM_SETICON, 0, hicon_small)
+        except Exception:
+            pass
 
     logger.info("TalkTrack UI ready")
     sys.exit(app.exec())

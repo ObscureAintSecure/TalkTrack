@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 
 from app.utils.audio_devices import (
-    get_input_devices, get_wasapi_output_devices,
+    get_input_devices, get_system_audio_devices,
     get_default_mic, get_default_output
 )
 from app.utils.platform_info import is_windows_11
@@ -69,8 +69,9 @@ class SourceSelector(QWidget):
     # Emitted when all checked apps go inactive during recording
     apps_went_inactive = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, config=None, parent=None):
         super().__init__(parent)
+        self._config = config
         self._mic_devices = []
         self._loopback_devices = []
         self._win11 = is_windows_11()
@@ -78,6 +79,7 @@ class SourceSelector(QWidget):
         self._had_active_apps = False
         self._setup_ui()
         self.refresh_devices()
+        self._restore_capture_mode()
 
         if self._win11:
             self._start_auto_refresh()
@@ -209,6 +211,15 @@ class SourceSelector(QWidget):
             if item.checkState() == Qt.CheckState.Checked:
                 checked_names.add(item.text().split("  (")[0])
 
+        # On first load (empty list), seed from saved config
+        if not checked_names and self._config:
+            try:
+                saved_apps = self._config.get("audio", "selected_apps")
+                if saved_apps:
+                    checked_names = set(saved_apps)
+            except (KeyError, TypeError):
+                pass
+
         self.app_list.clear()
 
         # Track whether any checked apps are still active
@@ -243,8 +254,16 @@ class SourceSelector(QWidget):
     def refresh_devices(self):
         self.mic_combo.clear()
 
+        # Get hidden device patterns from config
+        hidden = []
+        if self._config:
+            try:
+                hidden = self._config.get("audio", "hidden_devices") or []
+            except (KeyError, TypeError):
+                pass
+
         # Microphone devices
-        self._mic_devices = get_input_devices()
+        self._mic_devices = get_input_devices(hidden_devices=hidden)
         self.mic_combo.addItem("(None - don't record microphone)", None)
         default_mic = get_default_mic()
         default_mic_idx = 0
@@ -258,9 +277,9 @@ class SourceSelector(QWidget):
         if default_mic_idx > 0:
             self.mic_combo.setCurrentIndex(default_mic_idx)
 
-        # System audio (legacy dropdown - always populated)
+        # System audio dropdown - always populated
         self.loopback_combo.clear()
-        self._loopback_devices = get_wasapi_output_devices()
+        self._loopback_devices = get_system_audio_devices(hidden_devices=hidden)
         self.loopback_combo.addItem("(None - don't record system audio)", None)
         default_output = get_default_output()
         default_lb_idx = 0
@@ -273,6 +292,9 @@ class SourceSelector(QWidget):
 
         if default_lb_idx > 0:
             self.loopback_combo.setCurrentIndex(default_lb_idx)
+        elif self._loopback_devices:
+            # Default device didn't match — pick the first one
+            self.loopback_combo.setCurrentIndex(1)
 
         # Refresh app list too
         if self._win11 and self.app_list is not None:
@@ -284,9 +306,7 @@ class SourceSelector(QWidget):
         return self.mic_combo.currentData()
 
     def get_selected_loopback(self):
-        """Return loopback device index (legacy mode only)."""
-        if self.is_per_app_mode():
-            return None
+        """Return loopback device index for system audio capture."""
         return self.loopback_combo.currentData()
 
     def get_selected_app_pids(self):
@@ -319,6 +339,40 @@ class SourceSelector(QWidget):
         if self.mode_group and self.radio_per_app.isChecked():
             return True
         return False
+
+    def _restore_capture_mode(self):
+        """Restore capture mode and selected apps from config."""
+        if not self._config:
+            return
+        try:
+            mode = self._config.get("audio", "capture_mode")
+        except (KeyError, TypeError):
+            return
+
+        if self._win11 and self.mode_group:
+            if mode == "legacy":
+                self.radio_legacy.setChecked(True)
+                # Explicitly set visibility in case signal didn't fire
+                if self.app_list is not None:
+                    self.app_list.setVisible(False)
+                    self.loopback_combo.setVisible(True)
+            else:
+                self.radio_per_app.setChecked(True)
+
+    def save_capture_settings(self):
+        """Save current capture mode and selected app names to config."""
+        if not self._config:
+            return
+        self._config.set("audio", "capture_mode", self.get_capture_mode())
+
+        # Save checked app names (not PIDs, since those change)
+        selected_names = []
+        if self.app_list is not None:
+            for i in range(self.app_list.count()):
+                item = self.app_list.item(i)
+                if item.checkState() == Qt.CheckState.Checked:
+                    selected_names.append(item.text().split("  (")[0])
+        self._config.set("audio", "selected_apps", selected_names)
 
     def set_enabled(self, enabled):
         self.mic_combo.setEnabled(enabled)

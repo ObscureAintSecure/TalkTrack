@@ -64,10 +64,10 @@ class ActionItemsPanel(QWidget):
         layout.addWidget(self._scroll)
 
         btn_row = QHBoxLayout()
-        self._regen_btn = QPushButton("Regenerate")
-        self._regen_btn.clicked.connect(self.regenerate_requested.emit)
-        self._regen_btn.setVisible(False)
-        btn_row.addWidget(self._regen_btn)
+        self._gen_btn = QPushButton("Extract Action Items")
+        self._gen_btn.clicked.connect(self.regenerate_requested.emit)
+        self._gen_btn.setVisible(False)
+        btn_row.addWidget(self._gen_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -85,12 +85,32 @@ class ActionItemsPanel(QWidget):
 
         self._items_layout.addStretch()
         self._scroll.setVisible(True)
-        self._regen_btn.setVisible(True)
+        self._gen_btn.setText("Regenerate")
+        self._gen_btn.setVisible(True)
         self._status.setVisible(False)
+
+    def clear(self):
+        """Reset to initial empty state."""
+        self._items = []
+        while self._items_layout.count():
+            item = self._items_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._scroll.setVisible(False)
+        self._gen_btn.setVisible(False)
+        self._status.setText("No action items extracted yet.")
+        self._status.setVisible(True)
+
+    def set_ready(self):
+        """Show generate button when a transcript is available but no items yet."""
+        if not self._scroll.isVisible():
+            self._gen_btn.setText("Extract Action Items")
+            self._gen_btn.setVisible(True)
 
     def set_loading(self):
         self._status.setText("Extracting action items...")
         self._status.setVisible(True)
+        self._gen_btn.setVisible(False)
         self._scroll.setVisible(False)
 
     def _on_toggled(self, index, checked):

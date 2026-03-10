@@ -37,10 +37,10 @@ class SummaryPanel(QWidget):
         self._copy_btn.setVisible(False)
         btn_row.addWidget(self._copy_btn)
 
-        self._regen_btn = QPushButton("Regenerate")
-        self._regen_btn.clicked.connect(self.regenerate_requested.emit)
-        self._regen_btn.setVisible(False)
-        btn_row.addWidget(self._regen_btn)
+        self._gen_btn = QPushButton("Generate Summary")
+        self._gen_btn.clicked.connect(self.regenerate_requested.emit)
+        self._gen_btn.setVisible(False)
+        btn_row.addWidget(self._gen_btn)
 
         btn_row.addStretch()
         layout.addLayout(btn_row)
@@ -49,12 +49,29 @@ class SummaryPanel(QWidget):
         self._text.setMarkdown(text)
         self._text.setVisible(True)
         self._copy_btn.setVisible(True)
-        self._regen_btn.setVisible(True)
+        self._gen_btn.setText("Regenerate")
+        self._gen_btn.setVisible(True)
         self._status.setVisible(False)
+
+    def clear(self):
+        """Reset to initial empty state."""
+        self._text.clear()
+        self._text.setVisible(False)
+        self._copy_btn.setVisible(False)
+        self._gen_btn.setVisible(False)
+        self._status.setText("No summary generated yet.")
+        self._status.setVisible(True)
+
+    def set_ready(self):
+        """Show generate button when a transcript is available but no summary yet."""
+        if not self._text.isVisible():
+            self._gen_btn.setText("Generate Summary")
+            self._gen_btn.setVisible(True)
 
     def set_loading(self):
         self._status.setText("Generating summary...")
         self._status.setVisible(True)
+        self._gen_btn.setVisible(False)
         self._text.setVisible(False)
 
     def get_text(self):

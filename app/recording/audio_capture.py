@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 import queue
@@ -6,16 +7,17 @@ import sounddevice as sd
 import soundfile as sf
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 
 class AudioStream:
-    """Captures audio from a single device (mic or loopback)."""
+    """Captures audio from a single input device (mic) using sounddevice."""
 
-    def __init__(self, device_index, sample_rate=16000, channels=1, is_loopback=False,
+    def __init__(self, device_index, sample_rate=16000, channels=1,
                  level_callback=None):
         self.device_index = device_index
         self.sample_rate = sample_rate
         self.channels = channels
-        self.is_loopback = is_loopback
         self._level_callback = level_callback
         self._stream = None
         self._buffer = queue.Queue()
@@ -25,7 +27,7 @@ class AudioStream:
 
     def _audio_callback(self, indata, frames, time_info, status):
         if status:
-            print(f"Audio stream status: {status}")
+            logger.debug("Audio stream status: %s", status)
         if self._recording and not self._paused:
             chunk = indata.copy()
             self._buffer.put(chunk)
@@ -38,10 +40,6 @@ class AudioStream:
         self._paused = False
         self._all_chunks = []
 
-        extra_settings = None
-        if self.is_loopback:
-            extra_settings = sd.WasapiSettings(exclusive=False, auto_convert=True)
-
         try:
             self._stream = sd.InputStream(
                 device=self.device_index,
@@ -49,7 +47,6 @@ class AudioStream:
                 channels=self.channels,
                 callback=self._audio_callback,
                 dtype="float32",
-                extra_settings=extra_settings if self.is_loopback else None,
             )
             self._stream.start()
         except Exception as e:
@@ -88,6 +85,145 @@ class AudioStream:
         return self._recording and self._stream is not None
 
 
+class LoopbackStream:
+    """Captures system audio via WASAPI loopback using PyAudioWPatch."""
+
+    def __init__(self, device_name=None, sample_rate=16000, level_callback=None):
+        self._device_name = device_name
+        self._target_rate = sample_rate
+        self._level_callback = level_callback
+        self._stream = None
+        self._pa = None
+        self._recording = False
+        self._paused = False
+        self._all_chunks = []
+        self._native_rate = None
+        self._native_channels = None
+
+    def _find_loopback_device(self):
+        """Find the WASAPI loopback device matching the selected output."""
+        import pyaudiowpatch as pyaudio
+        self._pa = pyaudio.PyAudio()
+
+        # Find WASAPI host API
+        wasapi_idx = None
+        for i in range(self._pa.get_host_api_count()):
+            api = self._pa.get_host_api_info_by_index(i)
+            if "WASAPI" in api["name"]:
+                wasapi_idx = i
+                break
+
+        if wasapi_idx is None:
+            raise RuntimeError("WASAPI host API not found")
+
+        # Find loopback device
+        target_name = self._device_name
+        for loopback in self._pa.get_loopback_device_info_generator():
+            if target_name and target_name in loopback["name"]:
+                return loopback
+
+        # If no match, use default output's loopback
+        wasapi_info = self._pa.get_host_api_info_by_index(wasapi_idx)
+        default_output = self._pa.get_device_info_by_index(
+            wasapi_info["defaultOutputDevice"]
+        )
+        for loopback in self._pa.get_loopback_device_info_generator():
+            if default_output["name"] in loopback["name"]:
+                return loopback
+
+        # Last resort: first available loopback device
+        for loopback in self._pa.get_loopback_device_info_generator():
+            return loopback
+
+        raise RuntimeError("No WASAPI loopback device found")
+
+    def start(self):
+        import pyaudiowpatch as pyaudio
+
+        self._recording = True
+        self._paused = False
+        self._all_chunks = []
+
+        loopback_dev = self._find_loopback_device()
+        self._native_rate = int(loopback_dev["defaultSampleRate"])
+        self._native_channels = loopback_dev["maxInputChannels"]
+
+        logger.info(
+            "WASAPI loopback: %s (index=%d, rate=%d, ch=%d)",
+            loopback_dev["name"], loopback_dev["index"],
+            self._native_rate, self._native_channels,
+        )
+
+        self._stream = self._pa.open(
+            format=pyaudio.paFloat32,
+            channels=self._native_channels,
+            rate=self._native_rate,
+            input=True,
+            input_device_index=loopback_dev["index"],
+            frames_per_buffer=1024,
+            stream_callback=self._callback,
+        )
+        self._stream.start_stream()
+
+    def _callback(self, in_data, frame_count, time_info, status):
+        import pyaudiowpatch as pyaudio
+
+        if self._recording and not self._paused:
+            # Convert bytes to float32 numpy array
+            chunk = np.frombuffer(in_data, dtype=np.float32).copy()
+            chunk = chunk.reshape(-1, self._native_channels)
+
+            # Downmix to mono
+            if self._native_channels > 1:
+                mono = chunk.mean(axis=1).astype(np.float32)
+            else:
+                mono = chunk.flatten()
+
+            # Resample if needed
+            if self._native_rate != self._target_rate:
+                from scipy.signal import resample
+                target_len = int(len(mono) * self._target_rate / self._native_rate)
+                mono = resample(mono, target_len).astype(np.float32)
+
+            self._all_chunks.append(mono)
+            if self._level_callback is not None:
+                self._level_callback(mono)
+
+        return (None, pyaudio.paContinue)
+
+    def pause(self):
+        self._paused = True
+
+    def resume(self):
+        self._paused = False
+
+    def stop(self):
+        self._recording = False
+        if self._stream:
+            self._stream.stop_stream()
+            self._stream.close()
+            self._stream = None
+        if self._pa:
+            self._pa.terminate()
+            self._pa = None
+
+    def get_audio_data(self):
+        if not self._all_chunks:
+            return np.array([], dtype=np.float32)
+        return np.concatenate(self._all_chunks, axis=0)
+
+    def save_to_file(self, filepath):
+        data = self.get_audio_data()
+        if data.size == 0:
+            return None
+        sf.write(str(filepath), data, self._target_rate)
+        return str(filepath)
+
+    @property
+    def is_active(self):
+        return self._recording and self._stream is not None
+
+
 class DualAudioCapture:
     """Captures both microphone and system audio simultaneously."""
 
@@ -116,42 +252,44 @@ class DualAudioCapture:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        logger.info(
+            "DualAudioCapture.start: mic_device=%s, loopback_device=%s, "
+            "capture_mode=%s",
+            self.mic_device, self.loopback_device, self.capture_mode,
+        )
+
+        # Microphone capture (sounddevice)
         if self.mic_device is not None:
             self.mic_stream = AudioStream(
                 device_index=self.mic_device,
                 sample_rate=self.sample_rate,
                 channels=1,
-                is_loopback=False,
                 level_callback=self._mic_level_callback,
             )
             self.mic_stream.start()
+            logger.info("Mic stream started on device %s", self.mic_device)
+        else:
+            logger.warning("No mic device selected")
 
-        if self.capture_mode == "per_app" and self.app_pids:
-            from app.recording.process_audio_capture import ProcessAudioCapture
-            self.loopback_stream = ProcessAudioCapture(
-                pids=self.app_pids,
-                sample_rate=self.sample_rate,
-            )
-            self.loopback_stream.start()
-        elif self.loopback_device is not None:
-            self.loopback_stream = AudioStream(
-                device_index=self.loopback_device,
-                sample_rate=self.sample_rate,
-                channels=1,
-                is_loopback=True,
-                level_callback=self._system_level_callback,
-            )
+        # System audio capture (PyAudioWPatch WASAPI loopback)
+        if self.loopback_device is not None:
             try:
-                self.loopback_stream.start()
-            except RuntimeError:
-                self.loopback_stream = AudioStream(
-                    device_index=self.loopback_device,
+                # Get device name for matching to loopback device
+                dev_info = sd.query_devices(self.loopback_device)
+                device_name = dev_info.get("name", "")
+                logger.info("System audio: looking for loopback of '%s'", device_name)
+
+                self.loopback_stream = LoopbackStream(
+                    device_name=device_name,
                     sample_rate=self.sample_rate,
-                    channels=2,
-                    is_loopback=True,
                     level_callback=self._system_level_callback,
                 )
                 self.loopback_stream.start()
+            except Exception as e:
+                logger.error("Failed to start system audio capture: %s", e)
+                self.loopback_stream = None
+        else:
+            logger.warning("No system audio device selected")
 
         self._recording = True
         self._start_time = time.time()

@@ -103,12 +103,19 @@ class TranscriptionWorker(QThread):
     finished = pyqtSignal(TranscriptResult)
     error = pyqtSignal(str)
 
+    cancelled = pyqtSignal()
+
     def __init__(self, audio_path, model_size="base", language=None, device="cpu"):
         super().__init__()
         self.audio_path = audio_path
         self.model_size = model_size
         self.language = language
         self.device = device
+        self._cancel_requested = False
+
+    def cancel(self):
+        """Request cancellation of the transcription."""
+        self._cancel_requested = True
 
     def run(self):
         try:
@@ -137,6 +144,10 @@ class TranscriptionWorker(QThread):
                 compute_type=compute_type,
             )
 
+            if self._cancel_requested:
+                self.cancelled.emit()
+                return
+
             self.progress.emit("Transcribing audio...")
             segments_gen, info = model.transcribe(
                 self.audio_path,
@@ -151,6 +162,9 @@ class TranscriptionWorker(QThread):
             )
 
             for segment in segments_gen:
+                if self._cancel_requested:
+                    self.cancelled.emit()
+                    return
                 ts = TranscriptSegment(
                     start=segment.start,
                     end=segment.end,

@@ -109,6 +109,10 @@ class RecordingHeader(QWidget):
 
         self.info_label.setText("  |  ".join(parts))
 
+    def clear(self):
+        """Clear the header, hiding it."""
+        self.set_recording(None)
+
     def _start_rename(self):
         if self._editing:
             self._finish_rename()

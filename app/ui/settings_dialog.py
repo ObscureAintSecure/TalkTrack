@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
-    QLabel, QComboBox, QSpinBox, QCheckBox, QLineEdit,
+    QLabel, QComboBox, QSpinBox, QCheckBox, QLineEdit, QListWidget,
     QPushButton, QFileDialog, QGroupBox, QFormLayout, QMessageBox
 )
 from PyQt6.QtCore import Qt
@@ -42,6 +42,42 @@ class SettingsDialog(QDialog):
         audio_form.addRow("Channels:", self.channels_combo)
 
         audio_layout.addWidget(audio_group)
+
+        # Hidden devices group
+        hidden_group = QGroupBox("Hidden Devices")
+        hidden_layout = QVBoxLayout(hidden_group)
+
+        hidden_help = QLabel(
+            "Hide audio devices whose name contains any of these keywords.\n"
+            "Matching devices won't appear in the mic or system audio dropdowns."
+        )
+        hidden_help.setWordWrap(True)
+        hidden_help.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        hidden_layout.addWidget(hidden_help)
+
+        self.hidden_devices_list = QListWidget()
+        self.hidden_devices_list.setMaximumHeight(100)
+        hidden_layout.addWidget(self.hidden_devices_list)
+
+        hidden_btn_row = QHBoxLayout()
+        self.hidden_device_input = QLineEdit()
+        self.hidden_device_input.setPlaceholderText("e.g. Voicemeeter, Virtual Cable")
+        self.hidden_device_input.returnPressed.connect(self._add_hidden_device)
+        hidden_btn_row.addWidget(self.hidden_device_input)
+
+        add_btn = QPushButton("Add")
+        add_btn.setFixedWidth(60)
+        add_btn.clicked.connect(self._add_hidden_device)
+        hidden_btn_row.addWidget(add_btn)
+
+        remove_btn = QPushButton("Remove")
+        remove_btn.setFixedWidth(70)
+        remove_btn.clicked.connect(self._remove_hidden_device)
+        hidden_btn_row.addWidget(remove_btn)
+
+        hidden_layout.addLayout(hidden_btn_row)
+        audio_layout.addWidget(hidden_group)
+
         audio_layout.addStretch()
 
         tabs.addTab(audio_tab, "Audio")
@@ -101,6 +137,16 @@ class SettingsDialog(QDialog):
         self.language_edit = QLineEdit()
         self.language_edit.setPlaceholderText("auto-detect (leave empty)")
         whisper_form.addRow("Language:", self.language_edit)
+
+        self.min_duration_spin = QSpinBox()
+        self.min_duration_spin.setRange(0, 300)
+        self.min_duration_spin.setSuffix(" seconds")
+        self.min_duration_spin.setSpecialValueText("Always transcribe")
+        self.min_duration_spin.setToolTip(
+            "Skip auto-transcription for recordings shorter than this duration.\n"
+            "Set to 0 to always auto-transcribe."
+        )
+        whisper_form.addRow("Min duration to auto-transcribe:", self.min_duration_spin)
 
         transcription_layout.addWidget(whisper_group)
 
@@ -172,7 +218,12 @@ class SettingsDialog(QDialog):
         self.ai_api_key = QLineEdit()
         self.ai_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.ai_api_key.setPlaceholderText("Enter API key...")
+        self.ai_api_key.textChanged.connect(self._update_api_key_status)
         ai_form.addRow(self.ai_api_key_label, self.ai_api_key)
+
+        self.ai_key_status = QLabel("")
+        self.ai_key_status.setVisible(False)
+        ai_form.addRow("", self.ai_key_status)
 
         self.ai_model = QComboBox()
         self.ai_model.setEditable(True)
@@ -232,6 +283,11 @@ class SettingsDialog(QDialog):
         if idx >= 0:
             self.channels_combo.setCurrentIndex(idx)
 
+        # Hidden devices
+        hidden = self.config.get("audio", "hidden_devices") or []
+        for pattern in hidden:
+            self.hidden_devices_list.addItem(pattern)
+
         # Output
         self.output_dir_edit.setText(self.config.get("output", "directory"))
 
@@ -257,6 +313,9 @@ class SettingsDialog(QDialog):
 
         self._on_device_changed(self.device_combo.currentIndex())
 
+        min_dur = self.config.get("transcription", "min_duration")
+        self.min_duration_spin.setValue(min_dur if min_dur else 0)
+
         # Diarization
         self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
         self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
@@ -267,19 +326,35 @@ class SettingsDialog(QDialog):
         max_spk = self.config.get("diarization", "max_speakers")
         self.max_speakers_spin.setValue(max_spk if max_spk else 0)
 
-        # AI
+        # AI — load per-provider settings cache
+        self._current_provider = None
+        self._provider_settings = dict(self.config.get("ai", "provider_settings") or {})
+
+        # Migrate: if there's an existing api_key but no provider_settings entry,
+        # seed the current provider's settings from the flat fields
         provider = self.config.get("ai", "provider")
+        if provider != "none" and provider not in self._provider_settings:
+            self._provider_settings[provider] = {
+                "api_key": self.config.get("ai", "api_key") or "",
+                "model": self.config.get("ai", "model") or "",
+                "local_model_path": self.config.get("ai", "local_model_path") or "",
+            }
+
+        self._current_provider = provider
         idx = self.ai_provider_combo.findData(provider)
         if idx >= 0:
             self.ai_provider_combo.setCurrentIndex(idx)
-        self.ai_api_key.setText(self.config.get("ai", "api_key"))
-        self.ai_local_path.setText(self.config.get("ai", "local_model_path"))
         self.auto_summarize_cb.setChecked(self.config.get("ai", "auto_summarize"))
         self._on_ai_provider_changed(self.ai_provider_combo.currentIndex())
 
     def _save_and_close(self):
         self.config.set("audio", "sample_rate", self.sample_rate_combo.currentData())
         self.config.set("audio", "channels", self.channels_combo.currentData())
+
+        hidden = []
+        for i in range(self.hidden_devices_list.count()):
+            hidden.append(self.hidden_devices_list.item(i).text())
+        self.config.set("audio", "hidden_devices", hidden)
         self.config.set("output", "directory", self.output_dir_edit.text())
         self.config.set("output", "format", self.format_combo.currentData())
         self.config.set("transcription", "model_size", self.model_combo.currentData())
@@ -287,6 +362,7 @@ class SettingsDialog(QDialog):
 
         lang = self.language_edit.text().strip()
         self.config.set("transcription", "language", lang if lang else None)
+        self.config.set("transcription", "min_duration", self.min_duration_spin.value())
 
         self.config.set("diarization", "enabled", self.diarization_enabled.isChecked())
         self.config.set("diarization", "hf_token", self.hf_token_edit.text().strip())
@@ -303,11 +379,18 @@ class SettingsDialog(QDialog):
             if not self._install_provider_package(provider_type):
                 return  # User cancelled install, don't save
 
+        # Save current provider's fields into the cache before persisting
+        self._save_current_provider_settings()
+
         self.config.set("ai", "provider", provider_type)
-        self.config.set("ai", "api_key", self.ai_api_key.text())
-        self.config.set("ai", "model", self.ai_model.currentText())
-        self.config.set("ai", "local_model_path", self.ai_local_path.text())
+        # Set the flat fields to the active provider's values (used at runtime)
+        active = self._provider_settings.get(provider_type, {})
+        self.config.set("ai", "api_key", active.get("api_key", ""))
+        self.config.set("ai", "model", active.get("model", ""))
+        self.config.set("ai", "local_model_path", active.get("local_model_path", ""))
         self.config.set("ai", "auto_summarize", self.auto_summarize_cb.isChecked())
+        # Persist all provider settings so switching back restores them
+        self.config.set("ai", "provider_settings", self._provider_settings)
 
         self.config.save()
         self.accept()
@@ -321,7 +404,11 @@ class SettingsDialog(QDialog):
             self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
 
     def _on_ai_provider_changed(self, index):
+        # Save current provider's settings before switching
+        self._save_current_provider_settings()
+
         provider = self.ai_provider_combo.currentData()
+        self._current_provider = provider
         is_api = provider in ("claude", "openai", "grok", "gemini", "mistral")
         is_local = provider == "local"
         self.ai_api_key.setVisible(is_api)
@@ -343,8 +430,54 @@ class SettingsDialog(QDialog):
         elif provider == "local":
             self.ai_model.addItem("(set path below)")
 
+        # Restore this provider's saved settings
+        self._restore_provider_settings(provider)
+
         # Check if package is installed
         self._check_provider_package(provider)
+
+    def _save_current_provider_settings(self):
+        """Save the current provider's API key, model, and local path to the in-memory cache."""
+        prev = getattr(self, "_current_provider", None)
+        if not prev or prev == "none":
+            return
+        self._provider_settings[prev] = {
+            "api_key": self.ai_api_key.text(),
+            "model": self.ai_model.currentText(),
+            "local_model_path": self.ai_local_path.text(),
+        }
+
+    def _restore_provider_settings(self, provider):
+        """Restore a provider's saved API key, model, and local path."""
+        saved = self._provider_settings.get(provider, {})
+        self.ai_api_key.setText(saved.get("api_key", ""))
+        self.ai_local_path.setText(saved.get("local_model_path", ""))
+        saved_model = saved.get("model", "")
+        if saved_model:
+            idx = self.ai_model.findText(saved_model)
+            if idx >= 0:
+                self.ai_model.setCurrentIndex(idx)
+            else:
+                self.ai_model.setEditText(saved_model)
+        self._update_api_key_status()
+
+    def _update_api_key_status(self):
+        """Show a status indicator for whether an API key is configured."""
+        provider = self.ai_provider_combo.currentData()
+        is_api = provider in ("claude", "openai", "grok", "gemini", "mistral")
+        if not is_api:
+            self.ai_key_status.setVisible(False)
+            return
+        if self.ai_api_key.text():
+            masked = self.ai_api_key.text()[:4] + "..." + self.ai_api_key.text()[-4:]
+            self.ai_key_status.setText(
+                f'<span style="color: #a6e3a1;">API key configured ({masked})</span>'
+            )
+        else:
+            self.ai_key_status.setText(
+                '<span style="color: #fab387;">No API key set</span>'
+            )
+        self.ai_key_status.setVisible(True)
 
     def _on_device_changed(self, index):
         device = self.device_combo.currentData()
@@ -481,6 +614,21 @@ class SettingsDialog(QDialog):
                 QMessageBox.warning(self, "AI", "Connection failed.")
         except Exception as e:
             QMessageBox.critical(self, "AI Error", str(e))
+
+    def _add_hidden_device(self):
+        text = self.hidden_device_input.text().strip()
+        if not text:
+            return
+        # Avoid duplicates
+        for i in range(self.hidden_devices_list.count()):
+            if self.hidden_devices_list.item(i).text().lower() == text.lower():
+                return
+        self.hidden_devices_list.addItem(text)
+        self.hidden_device_input.clear()
+
+    def _remove_hidden_device(self):
+        for item in self.hidden_devices_list.selectedItems():
+            self.hidden_devices_list.takeItem(self.hidden_devices_list.row(item))
 
     def _browse_output_dir(self):
         directory = QFileDialog.getExistingDirectory(

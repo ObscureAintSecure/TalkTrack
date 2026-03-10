@@ -14,6 +14,25 @@ class TestSummaryPromptBuilder(unittest.TestCase):
         self.assertIn("Alice", prompt)
         self.assertIn("budget", prompt)
 
+    def test_build_summary_prompt_with_notes(self):
+        from app.ai.summarizer import build_summary_prompt
+        from app.transcription.transcriber import TranscriptSegment
+        segments = [
+            TranscriptSegment(0.0, 5.0, "Let's discuss the budget.", speaker="Alice"),
+        ]
+        prompt = build_summary_prompt(segments, {"Alice": "Alice"}, notes="Ask about Q3 numbers")
+        self.assertIn("Ask about Q3 numbers", prompt)
+        self.assertIn("USER NOTES", prompt)
+
+    def test_build_summary_prompt_without_notes(self):
+        from app.ai.summarizer import build_summary_prompt
+        from app.transcription.transcriber import TranscriptSegment
+        segments = [
+            TranscriptSegment(0.0, 5.0, "Hello.", speaker="Alice"),
+        ]
+        prompt = build_summary_prompt(segments, {"Alice": "Alice"}, notes="")
+        self.assertNotIn("USER NOTES", prompt)
+
     def test_build_action_items_prompt(self):
         from app.ai.summarizer import build_action_items_prompt
         from app.transcription.transcriber import TranscriptSegment
