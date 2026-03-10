@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
 
         # Left panel: controls at top, sources collapsible, recordings below
         left_panel = QWidget()
-        left_panel.setMaximumWidth(385)
+        left_panel.setMaximumWidth(500)
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(8, 8, 8, 8)
 
@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.tabs)
         splitter.addWidget(right_panel)
 
-        splitter.setSizes([275, 960])
+        splitter.setSizes([350, 910])
         main_layout.addWidget(splitter)
 
     def _setup_statusbar(self):
@@ -511,6 +511,12 @@ class MainWindow(QMainWindow):
     def _on_recording_selected(self, metadata):
         """Load a past recording for viewing/transcription."""
         self._current_session = metadata
+
+        # Clear previous state before loading
+        self.transcript_viewer.clear()
+        self.summary_panel.clear()
+        self.action_items_panel.clear()
+        self._transcript = None
 
         audio_files = metadata.get("audio_files", {})
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")

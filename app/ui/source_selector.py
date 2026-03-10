@@ -101,6 +101,7 @@ class SourceSelector(QWidget):
         mic_row.addWidget(mic_label)
 
         self.mic_combo = QComboBox()
+        self.mic_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         mic_row.addWidget(self.mic_combo, 1)
         content.addLayout(mic_row)
 
