@@ -27,3 +27,8 @@ dependencies = [
 # TalkTrack is a runnable application (main.py), not an importable library,
 # so uv should manage the environment without trying to build/install the project.
 package = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

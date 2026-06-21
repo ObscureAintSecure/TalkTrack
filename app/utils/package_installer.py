@@ -1,6 +1,8 @@
 """Ad-hoc package installer for optional AI provider dependencies."""
 
 import importlib
+import importlib.util
+import shutil
 import subprocess
 import sys
 
@@ -36,11 +38,37 @@ def get_package_info(provider_type: str) -> tuple[str, str] | None:
     return info[1], info[2]
 
 
+def _install_command(pip_package: str) -> list[str] | None:
+    """Build the install command for the *current* interpreter.
+
+    Always targets ``sys.executable`` so optional SDKs land in the active
+    environment (the project's .venv), never the global Python install.
+
+    Prefers pip when it's importable — e.g. a venv created by ``python -m venv``.
+    uv-created virtualenvs ship WITHOUT pip, so when pip is missing fall back to
+    ``uv pip install --python <sys.executable>``, which installs into this same
+    interpreter. Returns ``None`` if neither installer is available.
+    """
+    if importlib.util.find_spec("pip") is not None:
+        return [sys.executable, "-m", "pip", "install", pip_package]
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "pip", "install", "--python", sys.executable, pip_package]
+    return None
+
+
 def install_package(pip_package: str) -> tuple[bool, str]:
-    """Install a package via pip. Returns (success, output)."""
+    """Install a package into the current environment. Returns (success, output)."""
+    cmd = _install_command(pip_package)
+    if cmd is None:
+        return False, (
+            "Neither pip nor uv is available to install packages. "
+            "Install uv (https://docs.astral.sh/uv/) and relaunch, or recreate "
+            "the environment with pip available."
+        )
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", pip_package],
+            cmd,
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode == 0:
