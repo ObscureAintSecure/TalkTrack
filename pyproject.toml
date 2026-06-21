@@ -23,6 +23,25 @@ dependencies = [
     "transformers>=4.45.0",
 ]
 
+[project.optional-dependencies]
+# Optional AI assistant providers. Install only what you use, e.g.
+#   uv sync --extra claude          (or)   pip install ".[claude]"
+# These are also installed on demand from Settings > AI when a provider
+# is first selected; declaring them here keeps versions pinned and lockable.
+claude = ["anthropic>=0.40.0"]
+openai = ["openai>=1.50.0"]
+grok = ["openai>=1.50.0"]            # Grok (xAI) uses the OpenAI-compatible SDK
+gemini = ["google-generativeai>=0.8.0"]
+mistral = ["mistralai>=1.0.0"]
+local = ["llama-cpp-python>=0.3.0"]
+all-ai = [
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "google-generativeai>=0.8.0",
+    "mistralai>=1.0.0",
+    "llama-cpp-python>=0.3.0",
+]
+
 [tool.uv]
 # TalkTrack is a runnable application (main.py), not an importable library,
 # so uv should manage the environment without trying to build/install the project.

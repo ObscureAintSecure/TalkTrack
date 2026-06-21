@@ -200,6 +200,13 @@ TalkTrack integrates with AI providers to generate meeting summaries, extract ac
 
 SDK packages are **installed automatically** when you select a provider — no need to install them manually. Configure your provider and API key in **Settings > AI**.
 
+To pre-install a provider (e.g. for offline setup), use the optional extras:
+
+```bash
+uv sync --extra claude       # or: openai, grok, gemini, mistral, local, all-ai
+# without uv:  pip install ".[claude]"
+```
+
 ## Export Formats
 
 | Format | Description |
