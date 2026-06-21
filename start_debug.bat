@@ -1,38 +1,55 @@
 @echo off
 cd /d "%~dp0"
 
-:: Check if dependencies are installed (quick check of key packages)
-python -c "import PyQt6; import sounddevice; import numpy" 2>nul
+:: TalkTrack debug launcher — same environment as start.bat, but runs with a
+:: console window (python, not pythonw) so log output is visible.
+
+where uv >nul 2>&1
+if %errorlevel%==0 (
+    if not exist ".venv\" (
+        echo Creating isolated environment with uv...
+        uv sync
+        if errorlevel 1 (
+            echo.
+            echo Failed to sync dependencies with uv. Check the output above.
+            pause
+            exit /b 1
+        )
+    )
+    uv run python main.py
+    if errorlevel 1 (
+        echo.
+        echo TalkTrack exited with an error. Check the output above.
+        pause
+    )
+    goto :eof
+)
+
+:: Fallback: uv not installed. Use a LOCAL venv with pip (no global pollution).
+echo uv was not found on PATH. Falling back to a local venv via pip...
+echo Install uv for the best experience: https://docs.astral.sh/uv/getting-started/installation/
+echo.
+
+if not exist ".venv\" (
+    python -m venv .venv
+    if errorlevel 1 (
+        echo Failed to create virtual environment. Is Python installed?
+        pause
+        exit /b 1
+    )
+)
+
+call ".venv\Scripts\activate.bat"
+python -c "import PyQt6, sounddevice, numpy" 2>nul
 if errorlevel 1 (
-    echo ============================================
-    echo   TalkTrack - First Time Setup
-    echo ============================================
-    echo.
-    echo TalkTrack needs to install the following
-    echo Python packages. This only happens once
-    echo and may take a few minutes.
-    echo.
-    echo Packages to install:
-    echo ----------------------------------------
-    type requirements.txt
-    echo ----------------------------------------
-    echo.
-    set /p "CONFIRM=Press Enter to continue or Ctrl+C to cancel..."
-    echo.
-    echo Installing dependencies...
-    pip install -r requirements.txt
+    echo Installing dependencies into .venv...
+    python -m pip install -r requirements.txt
     if errorlevel 1 (
         echo.
         echo Failed to install dependencies. Check the output above.
         pause
         exit /b 1
     )
-    echo.
-    echo Dependencies installed successfully. Launching TalkTrack...
-    echo.
-) else (
-    :: Ensure all deps are up to date silently
-    pip install -r requirements.txt --quiet >nul 2>&1
 )
 
 python main.py

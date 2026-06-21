@@ -1,0 +1,29 @@
+[project]
+name = "talktrack"
+version = "0.1.0"
+description = "Record, transcribe, and diarize audio from calls (Teams, Zoom, etc.) on Windows."
+requires-python = ">=3.10"
+dependencies = [
+    "comtypes>=1.2.0",
+    "faster-whisper>=1.0.0",
+    "numpy>=1.24.0",
+    "psutil>=5.9.0",
+    "pyannote-audio>=4.0.0",
+    "pyaudiowpatch>=0.2.12",
+    "pycaw>=20230407",
+    "pydub>=0.25.1",
+    "pyqt6>=6.6.0",
+    "pywin32>=306",
+    "scipy>=1.11.0",
+    "sentence-transformers>=3.0.0",
+    "sounddevice>=0.4.6",
+    "soundfile>=0.12.0",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "transformers>=4.45.0",
+]
+
+[tool.uv]
+# TalkTrack is a runnable application (main.py), not an importable library,
+# so uv should manage the environment without trying to build/install the project.
+package = false

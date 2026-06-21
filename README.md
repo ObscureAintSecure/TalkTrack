@@ -68,9 +68,37 @@ git clone https://github.com/ObscureAintSecure/TalkTrack.git
 cd TalkTrack
 ```
 
-Double-click **`start.bat`** — it automatically detects missing dependencies and installs them on first launch (with your confirmation). No manual `pip install` needed.
+Just double-click **`start.bat`**. On first launch it sets up an isolated environment and installs dependencies automatically — no manual steps needed.
 
-To use the custom taskbar icon, first build the launcher:
+> **Note:** dependencies are installed into a project-local virtual environment (`.venv`), **not** your global Python. This keeps heavy packages like PyTorch and pyannote.audio from polluting or upgrading packages in your system Python.
+
+#### Recommended: [uv](https://docs.astral.sh/uv/)
+
+If [uv](https://docs.astral.sh/uv/getting-started/installation/) is installed, `start.bat` uses it automatically. You can also drive it directly:
+
+```bash
+uv sync            # create .venv and install pinned dependencies from uv.lock
+uv run python main.py
+```
+
+`uv sync` is reproducible (it installs the exact versions in `uv.lock`) and fast.
+
+#### Without uv
+
+If uv isn't installed, `start.bat` falls back to a local `.venv` created with Python's built-in `venv` + `pip`. To do it manually:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+> `requirements.txt` is kept in sync with `pyproject.toml` for users who prefer plain pip.
+
+#### Custom taskbar icon (optional)
+
+To use the custom taskbar icon, build the launcher:
 
 ```bash
 python build.py
@@ -79,13 +107,6 @@ python build.py
 Then launch with **`TalkTrack.exe main.py`** or use `start.bat` (which uses the exe automatically if present).
 
 For troubleshooting, use **`start_debug.bat`** which shows a console window with log output.
-
-Or run manually:
-
-```bash
-pip install -r requirements.txt
-python main.py
-```
 
 ### Speaker Diarization (Optional)
 
