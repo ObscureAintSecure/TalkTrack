@@ -53,6 +53,7 @@ DEFAULT_CONFIG = {
         "silence_duration": 120,
         "minimize_to_tray": False,
         "show_tray_hint": True,
+        "start_menu_offer_done": False,
     },
     "ui": {
         "theme": "dark",

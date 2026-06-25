@@ -31,13 +31,20 @@ def _start_menu_dir():
 def _find_launch_target(app_dir):
     """Find the best executable to target in the shortcut.
 
-    Prefers TalkTrack.exe (real file with embedded icon) over pythonw.exe
-    (MS Store app execution alias that Windows can't resolve in shortcuts).
+    Prefer the project-local venv interpreter (``.venv\\Scripts\\pythonw.exe``).
+    It's a real binary that works as a shortcut target AND keeps the app on its
+    isolated dependencies — so the shortcut launches the same environment as
+    start.bat, with the correct taskbar icon.
+
+    Fall back to a system pythonw (note: MS Store's pythonw is an execution
+    alias Windows can't resolve in shortcuts, which is exactly why the venv
+    interpreter is preferred).
     """
     app_dir = Path(app_dir)
-    talktrack_exe = app_dir / "TalkTrack.exe"
-    if talktrack_exe.exists():
-        return str(talktrack_exe), ""  # exe launches main.py itself
+
+    venv_pythonw = app_dir / ".venv" / "Scripts" / "pythonw.exe"
+    if venv_pythonw.exists():
+        return str(venv_pythonw), f'"{app_dir / "main.py"}"'
 
     # Fallback to pythonw
     found = shutil.which("pythonw")
@@ -83,10 +90,7 @@ def needs_shortcut(app_dir):
     # Shortcut exists — check if it points to the right target
     try:
         target, args, icon = _read_shortcut(lnk)
-        target_ok = (target and (
-            "TalkTrack.exe" in target
-            or (args and str(app_dir / "main.py") in args)
-        ))
+        target_ok = bool(target and args and str(app_dir / "main.py") in args)
         icon_ok = icon and str(icon_path) in icon
         if target_ok and icon_ok:
             return False

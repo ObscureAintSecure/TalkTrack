@@ -1111,6 +1111,54 @@ class MainWindow(QMainWindow):
         if SystemStatusDialog.should_show_on_startup(self.config):
             QTimer.singleShot(300, self._show_system_status)
 
+        # One-time offer to add a Start Menu shortcut (correct taskbar icon).
+        # Delayed so it lands after any setup/status dialogs above.
+        QTimer.singleShot(1500, self._maybe_offer_start_menu_shortcut)
+
+    def _maybe_offer_start_menu_shortcut(self):
+        """Offer to add a Start Menu shortcut once, on startup.
+
+        The shortcut targets the venv interpreter and carries TalkTrack's icon +
+        AppUserModelID, so Windows shows the correct taskbar icon. We record the
+        choice (yes or no) so the user is asked at most once.
+        """
+        if self.config.get("general", "start_menu_offer_done"):
+            return
+        if self._is_hidden_to_tray():
+            return  # don't pop a modal the user can't see; ask next visible launch
+        try:
+            from app.utils.start_menu import needs_shortcut, create_shortcut
+            app_dir = Path(__file__).parent.parent
+
+            if not needs_shortcut(app_dir):
+                self.config.set("general", "start_menu_offer_done", True)
+                return
+
+            reply = QMessageBox.question(
+                self,
+                "Add TalkTrack to Start Menu",
+                "Add a TalkTrack shortcut to your Start Menu?\n\n"
+                "This gives the correct taskbar icon. Once it's running you can "
+                "right-click the taskbar icon and choose Pin to taskbar.\n\n"
+                "You can also do this later from Help > Add to Start Menu.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            # Record the choice either way so we don't ask again.
+            self.config.set("general", "start_menu_offer_done", True)
+
+            if reply == QMessageBox.StandardButton.Yes:
+                create_shortcut(app_dir)
+                QMessageBox.information(
+                    self, "Start Menu Shortcut",
+                    "Shortcut created. The taskbar icon updates next time you "
+                    "launch from the Start Menu."
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger("talktrack").warning(
+                "Start Menu shortcut offer failed: %s", e
+            )
+
     def _open_log_file(self):
         import os
         from main import get_log_file
