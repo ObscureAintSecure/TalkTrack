@@ -44,7 +44,7 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **Hidden devices filter** — hide unwanted audio devices (e.g., Voicemeeter) from dropdowns via Settings
 - **Remembers capture settings** — capture mode and selected apps persist across sessions
 - **Min recording length** — automatically discard recordings shorter than a configurable threshold (Settings > General)
-- **Custom app icon** — TalkTrack.exe launcher with embedded icon for proper Windows taskbar display
+- **Custom app icon** — first-run Start Menu shortcut (targeting the venv) gives the correct Windows taskbar icon
 - **Collapsible audio sources** — compact UI with expandable source selector
 - **GPU/CUDA detection** — System Status panel detects your GPU and guides CUDA setup
 - **File logging** — all errors logged to `~/.talktrack/talktrack.log` with crash dialog
@@ -81,7 +81,26 @@ uv sync            # create .venv and install pinned dependencies from uv.lock
 uv run python main.py
 ```
 
-`uv sync` is reproducible (it installs the exact versions in `uv.lock`) and fast.
+`uv sync` is reproducible (it installs the exact versions in `uv.lock`) and fast. By default it installs **CPU** PyTorch, which works on any machine.
+
+#### GPU acceleration (NVIDIA, optional)
+
+If you have an NVIDIA GPU, install the CUDA build of PyTorch for much faster transcription and diarization. CPU and GPU builds are mutually exclusive extras — pick one:
+
+```bash
+uv sync --extra cuda     # CUDA 12.6 build (NVIDIA GPU)
+# CPU is the default; uv sync --extra cpu pins the CPU build explicitly
+```
+
+Without uv:
+
+```bash
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
+```
+
+Confirm it worked in **Help > System Status** (GPU Acceleration should read "detected with CUDA 12.6"), then set **Compute Device** to CUDA in Settings.
+
+> Windows note: if `uv sync --extra cuda` fails with `failed to rename ... Access is denied (os error 5)`, antivirus is locking the large download in uv's cache. Retry, run `uv cache clean` first, or add `%LOCALAPPDATA%\uv\cache` to your antivirus exclusions. The plain-pip command above sidesteps it.
 
 #### Without uv
 
@@ -96,15 +115,9 @@ python main.py
 
 > `requirements.txt` is kept in sync with `pyproject.toml` for users who prefer plain pip.
 
-#### Custom taskbar icon (optional)
+#### Custom taskbar icon
 
-To use the custom taskbar icon, build the launcher:
-
-```bash
-python build.py
-```
-
-Then launch with **`TalkTrack.exe main.py`** or use `start.bat` (which uses the exe automatically if present).
+On first run TalkTrack offers to add a Start Menu shortcut (also available any time via **Help > Add to Start Menu**). The shortcut targets the project's `.venv` interpreter and carries the app icon, so Windows shows the correct taskbar icon. Launch from that shortcut, then right-click the running taskbar icon and choose **Pin to taskbar** if you want it pinned.
 
 For troubleshooting, use **`start_debug.bat`** which shows a console window with log output.
 
@@ -241,8 +254,7 @@ Access via the gear icon or **Edit > Settings**:
 ```
 TalkTrack/
   main.py                    # Entry point, logging, crash handling
-  build.py                   # Build TalkTrack.exe launcher with custom icon
-  start.bat                  # Launcher (auto-installs dependencies)
+  start.bat                  # Launcher (uv-first, .venv isolation, pip fallback)
   start_debug.bat            # Debug launcher with console output
   requirements.txt           # Dependencies
   resources/

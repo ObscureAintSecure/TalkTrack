@@ -32,8 +32,7 @@ TalkTrack is a Windows desktop application that records, transcribes, and diariz
 ```
 TalkTrack/
   main.py                              # Entry point, QApplication setup
-  build.py                             # Build TalkTrack.exe launcher with custom icon
-  start.bat                            # Launcher (auto-installs deps, uses TalkTrack.exe if present)
+  start.bat                            # Launcher (uv-first, .venv isolation, falls back to pip)
   start_debug.bat                      # Debug launcher with console output
   requirements.txt                     # Dependencies
   app/
@@ -153,7 +152,7 @@ TalkTrack/
 - **Capture settings persistence:** remembers capture mode (per-app vs legacy) and selected apps
 - **Min duration filter:** skip auto-transcription for short recordings (configurable in Settings)
 - **Multi-select bulk delete:** select multiple recordings and delete at once (Ctrl/Shift+click)
-- **Custom app icon:** TalkTrack.exe launcher with embedded icon for proper taskbar display
+- **Custom app icon:** Start Menu shortcut (offered on first run) targets the venv interpreter and carries the icon + AppUserModelID for a correct taskbar icon
 - **About dialog:** version info and Buy Me a Coffee donation link
 - **Silence auto-stop:** monitors system/app audio (not mic) for sustained silence, auto-stops recording after configurable duration (Settings > General)
 - **Continue from here:** checkbox next to Play All — click any segment to start continuous playback from that point
@@ -283,8 +282,7 @@ When running shell commands:
 - **torchcodec warning suppression:** `warnings.filterwarnings("ignore", module=r"pyannote\.audio\.core\.io")` in main.py.
 - **PyQt6 QListWidget truthiness:** Empty QListWidget evaluates as falsy in PyQt6. Always use `is None` / `is not None` checks, never `if widget:` / `if not widget:`.
 - **WASAPI device index mismatch:** `sd.default.device[1]` returns DirectSound/MME index that doesn't match WASAPI device indices. `get_default_output()` matches by device name instead of index.
-- **Microsoft Store Python AppUserModelID:** Store-packaged Python overrides `SetCurrentProcessExplicitAppUserModelID`. Workaround: `build.py` copies `pythonw.exe` to `TalkTrack.exe` with replaced icon resource, so the exe has its own identity.
-- **PyInstaller + MS Store Python:** `--onefile` mode fails to extract to temp dir with MS Store Python. Use `--onedir` or the `build.py` copy-and-patch approach instead.
+- **Microsoft Store Python AppUserModelID / taskbar icon:** Store-packaged Python's `pythonw` is an execution alias that overrides `SetCurrentProcessExplicitAppUserModelID` and can't be a shortcut target, so the taskbar shows the generic Python icon. Workaround: the app offers (on first run, or Help > Add to Start Menu via `app/utils/start_menu.py`) a Start Menu shortcut that targets the **venv** `pythonw` (`.venv\Scripts\pythonw.exe`, a real binary) and carries `talktrack.ico` + the `TalkTrack.TalkTrack.1` AppUserModelID. main.py sets the matching per-window AppUserModelID, so Windows resolves the shortcut's icon onto the taskbar. No PyInstaller/exe build needed.
 
 ## Known Limitations
 
