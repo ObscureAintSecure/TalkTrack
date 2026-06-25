@@ -18,10 +18,13 @@ dependencies = [
     "sentence-transformers>=3.0.0",
     "sounddevice>=0.4.6",
     "soundfile>=0.12.0",
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
     "transformers>=4.45.0",
 ]
+# NOTE: torch/torchaudio are intentionally NOT in base dependencies. They are
+# split into mutually-exclusive `cpu` and `cuda` extras (see below) so uv can
+# lock a CPU build and a CUDA build separately. Pick exactly one when syncing:
+#   uv sync --extra cpu     (default, no GPU needed)
+#   uv sync --extra cuda    (NVIDIA GPU acceleration, CUDA 12.6)
 
 [project.optional-dependencies]
 # Optional AI assistant providers. Install only what you use, e.g.
@@ -42,10 +45,52 @@ all-ai = [
     "llama-cpp-python>=0.3.0",
 ]
 
+# PyTorch builds, mutually exclusive (enforced by [tool.uv] conflicts below).
+# `cpu` = CPU-only wheels (works on any machine, no NVIDIA card required).
+# `cuda` = CUDA 12.6 wheels for NVIDIA GPU acceleration of transcription and
+# diarization. CUDA 12.6 matches the GPU Acceleration check in
+# dependency_checker.py. Plain-pip equivalent for GPU:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
+cpu = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+]
+cuda = [
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+]
+
 [tool.uv]
 # TalkTrack is a runnable application (main.py), not an importable library,
 # so uv should manage the environment without trying to build/install the project.
 package = false
+# CPU and CUDA torch can't coexist — force callers to pick one extra.
+conflicts = [
+    [{ extra = "cpu" }, { extra = "cuda" }],
+]
+
+# Route torch/torchaudio to the right PyTorch index per extra. `explicit = true`
+# means these indexes serve ONLY packages pinned to them here, never general
+# resolution, so other dependencies still come from PyPI.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu126", extra = "cuda" },
+]
+torchaudio = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu126", extra = "cuda" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
 
 [dependency-groups]
 dev = [
