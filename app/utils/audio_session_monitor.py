@@ -10,6 +10,12 @@ import psutil
 from pycaw.pycaw import AudioUtilities
 
 
+# pycaw / Windows AudioSessionState enum values.
+_AUDIO_SESSION_STATE_INACTIVE = 0
+_AUDIO_SESSION_STATE_ACTIVE = 1
+_AUDIO_SESSION_STATE_EXPIRED = 2
+
+
 FRIENDLY_NAMES = {
     "msedge": "Microsoft Edge",
     "msedgewebview2": "Microsoft Edge",
@@ -122,6 +128,17 @@ def get_active_audio_apps():
         pid = session.Process.pid
         if pid == 0:
             continue
+
+        # Only count sessions that are actually rendering audio. Without this,
+        # an app that merely rendered audio once (now Inactive) or whose stream
+        # has gone away (Expired) was still reported as active. An unreadable
+        # state is kept on purpose — don't hide a possibly-active app. (issue #6)
+        try:
+            if session.State in (_AUDIO_SESSION_STATE_INACTIVE,
+                                 _AUDIO_SESSION_STATE_EXPIRED):
+                continue
+        except Exception:
+            pass
 
         process_name = session.Process.name()
 

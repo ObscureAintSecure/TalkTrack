@@ -220,5 +220,79 @@ class TestGetActiveAudioApps(unittest.TestCase):
         self.assertEqual(result[0]["name"], "Spotify")
 
 
+    # --- session State filtering (issue #6) ---
+
+    @patch("app.utils.audio_session_monitor.psutil")
+    @patch("app.utils.audio_session_monitor.AudioUtilities")
+    def test_active_session_state_one_is_listed_active(self, mock_au, mock_psutil):
+        sess = MagicMock()
+        sess.Process = MagicMock()
+        sess.Process.name.return_value = "Spotify.exe"
+        sess.Process.pid = 11
+        sess.State = 1  # AudioSessionStateActive
+        mock_au.GetAllSessions.return_value = [sess]
+        mock_psutil.process_iter.return_value = []
+
+        from app.utils.audio_session_monitor import get_active_audio_apps
+        result = get_active_audio_apps()
+        self.assertEqual(len(result), 1)
+        self.assertTrue(result[0]["active"])
+
+    @patch("app.utils.audio_session_monitor.psutil")
+    @patch("app.utils.audio_session_monitor.AudioUtilities")
+    def test_inactive_session_state_zero_is_filtered(self, mock_au, mock_psutil):
+        sess = MagicMock()
+        sess.Process = MagicMock()
+        sess.Process.name.return_value = "vlc.exe"  # not a known audio app
+        sess.Process.pid = 22
+        sess.State = 0  # AudioSessionStateInactive
+        mock_au.GetAllSessions.return_value = [sess]
+        mock_psutil.process_iter.return_value = []
+
+        from app.utils.audio_session_monitor import get_active_audio_apps
+        result = get_active_audio_apps()
+        self.assertEqual(result, [])
+
+    @patch("app.utils.audio_session_monitor.psutil")
+    @patch("app.utils.audio_session_monitor.AudioUtilities")
+    def test_expired_session_state_two_is_filtered(self, mock_au, mock_psutil):
+        sess = MagicMock()
+        sess.Process = MagicMock()
+        sess.Process.name.return_value = "vlc.exe"
+        sess.Process.pid = 33
+        sess.State = 2  # AudioSessionStateExpired
+        mock_au.GetAllSessions.return_value = [sess]
+        mock_psutil.process_iter.return_value = []
+
+        from app.utils.audio_session_monitor import get_active_audio_apps
+        result = get_active_audio_apps()
+        self.assertEqual(result, [])
+
+    @patch("app.utils.audio_session_monitor.psutil")
+    @patch("app.utils.audio_session_monitor.AudioUtilities")
+    def test_known_app_with_inactive_session_shows_inactive_via_process(self, mock_au, mock_psutil):
+        # Teams idle: only an Inactive session, but it's a known audio app, so
+        # it should still appear (from the process scan) marked active=False.
+        sess = MagicMock()
+        sess.Process = MagicMock()
+        sess.Process.name.return_value = "ms-teams.exe"
+        sess.Process.pid = 44
+        sess.State = 0
+        mock_au.GetAllSessions.return_value = [sess]
+
+        proc = MagicMock()
+        proc.info = {"pid": 44, "name": "ms-teams.exe"}
+        mock_psutil.process_iter.return_value = [proc]
+        mock_psutil.NoSuchProcess = Exception
+        mock_psutil.AccessDenied = Exception
+
+        from app.utils.audio_session_monitor import get_active_audio_apps
+        result = get_active_audio_apps()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "Microsoft Teams")
+        self.assertFalse(result[0]["active"])
+        self.assertEqual(result[0]["pids"], [44])
+
+
 if __name__ == "__main__":
     unittest.main()
