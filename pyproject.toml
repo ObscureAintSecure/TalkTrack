@@ -3,22 +3,27 @@ name = "talktrack"
 version = "0.1.0"
 description = "Record, transcribe, and diarize audio from calls (Teams, Zoom, etc.) on Windows."
 requires-python = ">=3.10"
+# Heavy ML/numerical deps carry an upper bound capping the next major version,
+# where breaking changes concentrate (e.g. the numpy 1->2, transformers 4->5
+# jumps). This blocks a future `uv lock` or a plain-pip install from silently
+# pulling an untested major, while still allowing minor/patch updates. The
+# current locked versions all sit under these caps. (issue #4)
 dependencies = [
     "comtypes>=1.2.0",
-    "faster-whisper>=1.0.0",
-    "numpy>=1.24.0",
+    "faster-whisper>=1.0.0,<2",
+    "numpy>=1.24.0,<3",
     "psutil>=5.9.0",
-    "pyannote-audio>=4.0.0",
+    "pyannote-audio>=4.0.0,<5",
     "pyaudiowpatch>=0.2.12",
     "pycaw>=20230407",
     "pydub>=0.25.1",
     "pyqt6>=6.6.0",
     "pywin32>=306",
-    "scipy>=1.11.0",
-    "sentence-transformers>=3.0.0",
+    "scipy>=1.11.0,<2",
+    "sentence-transformers>=3.0.0,<6",
     "sounddevice>=0.4.6",
     "soundfile>=0.12.0",
-    "transformers>=4.45.0",
+    "transformers>=4.45.0,<6",
 ]
 # NOTE: torch/torchaudio are intentionally NOT in base dependencies. They are
 # split into mutually-exclusive `cpu` and `cuda` extras (see below) so uv can
@@ -52,12 +57,12 @@ all-ai = [
 # dependency_checker.py. Plain-pip equivalent for GPU:
 #   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
 cpu = [
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
+    "torch>=2.0.0,<3",
+    "torchaudio>=2.0.0,<3",
 ]
 cuda = [
-    "torch>=2.0.0",
-    "torchaudio>=2.0.0",
+    "torch>=2.0.0,<3",
+    "torchaudio>=2.0.0,<3",
 ]
 
 [tool.uv]

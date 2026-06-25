@@ -1,20 +1,23 @@
+# Heavy ML/numerical deps cap the next major version (where breaking changes
+# concentrate) so a plain-pip install won't silently pull an untested major.
+# Kept in sync with pyproject.toml. (issue #4)
 PyQt6>=6.6.0
 sounddevice>=0.4.6
 PyAudioWPatch>=0.2.12
-numpy>=1.24.0
-faster-whisper>=1.0.0
-pyannote.audio>=4.0.0
-torch>=2.0.0
-torchaudio>=2.0.0
-scipy>=1.11.0
+numpy>=1.24.0,<3
+faster-whisper>=1.0.0,<2
+pyannote.audio>=4.0.0,<5
+torch>=2.0.0,<3
+torchaudio>=2.0.0,<3
+scipy>=1.11.0,<2
 pydub>=0.25.1
 pywin32>=306
 soundfile>=0.12.0
 pycaw>=20230407
 comtypes>=1.2.0
 psutil>=5.9.0
-transformers>=4.45.0
-sentence-transformers>=3.0.0
+transformers>=4.45.0,<6
+sentence-transformers>=3.0.0,<6
 
 # AI Providers — installed automatically when selected in Settings
 # anthropic>=0.40.0          # Claude
