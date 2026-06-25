@@ -9,6 +9,11 @@
 - Never add `Co-Authored-By` lines (see `feedback_no_coauthor.md` memory).
 - Never `--amend`; always new commits.
 
+## Issue tracking
+
+- Every change, bug fix, or feature needs a **GitHub issue** to track it, created before (or alongside) the work. Reference the issue number in the commit/PR. Adopted 2026-06-25.
+- Applies from this point forward; pre-existing/retroactive items can be filed as relevant.
+
 ## Testing
 
 - **Non-UI logic**: TDD — write failing tests in `tests/`, confirm failure, implement, confirm pass.
