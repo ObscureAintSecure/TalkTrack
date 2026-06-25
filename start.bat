@@ -4,6 +4,11 @@ cd /d "%~dp0"
 :: TalkTrack launcher.
 :: Preferred path: uv manages an isolated .venv from pyproject.toml / uv.lock,
 :: so dependencies never pollute your global Python install.
+::
+:: Either path activates the project .venv, then launches main.py with the venv
+:: pythonw. The custom taskbar icon comes from the in-app Start Menu shortcut
+:: (offered on first run, or Help > Add to Start Menu), which targets this same
+:: venv interpreter.
 
 where uv >nul 2>&1
 if %errorlevel%==0 (
@@ -27,8 +32,8 @@ if %errorlevel%==0 (
         echo Dependencies installed. Launching TalkTrack...
         echo.
     )
-    start "" /b uv run pythonw main.py
-    goto :eof
+    call ".venv\Scripts\activate.bat"
+    goto :launch
 )
 
 :: Fallback: uv not installed. Use a LOCAL venv with pip (still no global pollution).
@@ -60,4 +65,7 @@ if errorlevel 1 (
     )
 )
 
+:launch
+:: .venv is active here, so `pythonw` resolves to .venv\Scripts\pythonw.exe.
 start "" /b pythonw main.py
+goto :eof

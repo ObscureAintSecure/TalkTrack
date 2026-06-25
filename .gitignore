@@ -4,8 +4,6 @@ __pycache__/
 dist/
 build/
 *.spec
-_internal/
-TalkTrack.exe
 .eggs/
 *.egg
 .venv/
