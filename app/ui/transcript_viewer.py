@@ -154,6 +154,7 @@ class TranscriptViewer(QWidget):
             "will continue playing all segments from that point."
         )
         self.continue_from_cb.setStyleSheet("color: #a6adc8; font-size: 12px;")
+        self.continue_from_cb.toggled.connect(self._on_continue_toggled)
         export_row.addWidget(self.continue_from_cb)
 
         export_row.addStretch()
@@ -325,6 +326,16 @@ class TranscriptViewer(QWidget):
         if not self._audio_path or not self._transcript:
             return
         self._start_continuous_play(0)
+
+    def _on_continue_toggled(self, checked):
+        """Disabling 'Continue playing' mid-playback stops the continuous advance.
+
+        Without this, unchecking the box while audio is playing did nothing —
+        playback kept advancing because _on_playback_finished only looked at the
+        _continuous_play flag, not the checkbox state.
+        """
+        if not checked and self._continuous_play:
+            self._stop_continuous_play()
 
     def _start_continuous_play(self, from_index):
         """Start playing all segments sequentially from the given index."""
