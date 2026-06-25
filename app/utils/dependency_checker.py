@@ -131,6 +131,12 @@ class DependencyChecker:
         """Check GPU availability and CUDA PyTorch setup."""
         info = self.detect_gpu_cuda()
 
+        # gpu_name from torch/nvidia-smi already includes "NVIDIA" on modern
+        # cards; older ones may not. Normalize to exactly one "NVIDIA " prefix
+        # so messages don't read "NVIDIA NVIDIA GeForce ...".
+        _name = info["gpu_name"] or "GPU"
+        gpu = _name if _name.upper().startswith("NVIDIA") else f"NVIDIA {_name}"
+
         # Check what device the user has configured
         configured_device = "cpu"
         if self.config:
@@ -144,12 +150,12 @@ class DependencyChecker:
                 "name": "GPU Acceleration",
                 "passed": True,
                 "level": "info",
-                "message": f"NVIDIA {info['gpu_name']} detected with CUDA {info['cuda_version']}.",
+                "message": f"{gpu} detected with CUDA {info['cuda_version']}.",
                 "action": None,
             }
         elif info["has_nvidia_gpu"]:
             action = (
-                f"NVIDIA {info['gpu_name']} detected but PyTorch is CPU-only. "
+                f"{gpu} detected but PyTorch is CPU-only. "
                 "To enable GPU acceleration, run:\n"
                 "pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126"
             )
@@ -159,7 +165,7 @@ class DependencyChecker:
                 "name": "GPU Acceleration",
                 "passed": False,
                 "level": "warn",
-                "message": f"NVIDIA {info['gpu_name']} found but CUDA PyTorch not installed.",
+                "message": f"{gpu} found but CUDA PyTorch not installed.",
                 "action": action,
             }
         else:
