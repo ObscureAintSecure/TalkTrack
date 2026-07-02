@@ -526,19 +526,13 @@ def activate_process_loopback(pid, timeout_ms=5000):
                            pid, ce.hresult & 0xFFFFFFFF)
             return None, ce.hresult & 0xFFFFFFFF
 
-        try:
-            mix_format_ptr = audio_client.GetMixFormat()
-        except comtypes.COMError:
-            native_rate, native_channels, native_format, native_frame_bytes = (
-                _format_info_from_waveformatex(requested_format)
-            )
-        else:
-            try:
-                native_rate, native_channels, native_format, native_frame_bytes = (
-                    _format_info_from_waveformatex(mix_format_ptr.contents)
-                )
-            finally:
-                ctypes.windll.ole32.CoTaskMemFree(mix_format_ptr)
+        # The engine delivers buffers in the format we Initialize()d with, NOT
+        # the endpoint mix format. GetMixFormat() can differ (44.1 kHz, >2ch,
+        # 24-bit) and interpreting the requested-format buffers with it
+        # pitch-shifts the audio or over-reads the buffer.
+        native_rate, native_channels, native_format, native_frame_bytes = (
+            _format_info_from_waveformatex(requested_format)
+        )
         logger.debug("[PID %s] negotiated format: %d Hz x %d ch (%s), frame_bytes=%d",
                      pid, native_rate, native_channels, native_format,
                      native_frame_bytes)
