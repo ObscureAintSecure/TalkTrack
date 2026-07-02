@@ -61,6 +61,38 @@ class TestParseActionItems(unittest.TestCase):
         self.assertEqual(items, [])
 
 
+class TestParseActionItemsHardening(unittest.TestCase):
+    def test_prose_wrapped_array_without_fences(self):
+        from app.ai.summarizer import parse_action_items
+        response = 'Here are the items:\n[{"task": "Send report", "assignee": "Bob", "deadline": ""}]\nLet me know!'
+        items = parse_action_items(response)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["task"], "Send report")
+
+    def test_non_dict_entries_filtered(self):
+        from app.ai.summarizer import parse_action_items
+        response = '[{"task": "A", "assignee": "", "deadline": ""}, "stray string", 42]'
+        items = parse_action_items(response)
+        self.assertEqual(len(items), 1)
+
+    def test_items_without_task_filtered(self):
+        from app.ai.summarizer import parse_action_items
+        response = '[{"assignee": "Bob"}, {"task": "Real one"}]'
+        items = parse_action_items(response)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["task"], "Real one")
+
+    def test_missing_fields_coerced_to_empty_strings(self):
+        from app.ai.summarizer import parse_action_items
+        items = parse_action_items('[{"task": "A"}]')
+        self.assertEqual(items[0]["assignee"], "")
+        self.assertEqual(items[0]["deadline"], "")
+
+    def test_object_response_returns_empty(self):
+        from app.ai.summarizer import parse_action_items
+        self.assertEqual(parse_action_items('{"task": "not a list"}'), [])
+
+
 class TestTranscriptTruncation(unittest.TestCase):
     def test_short_text_unchanged(self):
         from app.ai.summarizer import truncate_transcript

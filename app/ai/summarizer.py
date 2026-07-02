@@ -84,15 +84,24 @@ def build_action_items_prompt(segments, speaker_names, notes="", instruction="",
 
 def parse_action_items(response):
     text = response.strip()
-    if "```" in text:
-        start = text.find("[")
-        end = text.rfind("]") + 1
-        if start >= 0 and end > start:
-            text = text[start:end]
+    # Models wrap the array in fences or prose; extract the outermost [...].
+    start = text.find("[")
+    end = text.rfind("]") + 1
+    if start >= 0 and end > start:
+        text = text[start:end]
     try:
         items = json.loads(text)
-        if isinstance(items, list):
-            return items
     except (json.JSONDecodeError, ValueError):
-        pass
-    return []
+        return []
+    if not isinstance(items, list):
+        return []
+    cleaned = []
+    for item in items:
+        if not isinstance(item, dict) or not item.get("task"):
+            continue
+        cleaned.append({
+            "task": str(item.get("task", "")),
+            "assignee": str(item.get("assignee") or ""),
+            "deadline": str(item.get("deadline") or ""),
+        })
+    return cleaned
