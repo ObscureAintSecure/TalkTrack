@@ -106,6 +106,10 @@ class ChatPanel(QWidget):
         self._session_dir = session_dir
         self._load_history()
 
+    def active_worker(self):
+        """Return the in-flight ChatWorker, if any (for shutdown handling)."""
+        return self._worker
+
     def clear_chat(self):
         self._history = []
         while self._messages_layout.count():

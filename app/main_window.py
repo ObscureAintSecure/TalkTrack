@@ -1444,6 +1444,11 @@ class MainWindow(QMainWindow):
                 return
             self._really_quit = True
 
+        # Blocks _start_transcription, so stopping the recorder below can't
+        # auto-spawn a new worker while the event loop is exiting.
+        self._closing = True
+        self._pending_transcriptions.clear()
+
         if self._gain_save_timer.isActive():
             self._gain_save_timer.stop()
             self._flush_gain_to_config()
@@ -1457,10 +1462,34 @@ class MainWindow(QMainWindow):
             self._stop_system_monitor()
         if self.recorder.state != RecordingState.IDLE:
             self.recorder.stop_recording()
+        self._shutdown_workers()
         self.config.save()
         if hasattr(self, "tray"):
             self.tray.hide()
         event.accept()
+
+    def _shutdown_workers(self):
+        """Stop background QThreads before the event loop exits.
+
+        A QThread destroyed while running aborts the process. Transcription
+        cancels cooperatively; diarization/summarize/chat block in native or
+        network code, so after a bounded wait terminate() is the last resort —
+        risky in general, but the process is exiting anyway.
+        """
+        if self._transcription_worker is not None and self._transcription_worker.isRunning():
+            self._transcription_worker.cancel()
+        workers = [
+            self._transcription_worker,
+            self._diarization_worker,
+            self._summarize_worker,
+            self.chat_panel.active_worker(),
+        ]
+        for worker in workers:
+            if worker is None or not worker.isRunning():
+                continue
+            if not worker.wait(5000):
+                worker.terminate()
+                worker.wait(1000)
 
     def _confirm_exit(self):
         """Show the exit-confirmation dialog. Returns True if user wants to quit."""
