@@ -24,14 +24,19 @@ LOG_DIR = Path.home() / ".talktrack"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = LOG_DIR / "talktrack.log"
 
+_log_handlers = [
+    logging.handlers.RotatingFileHandler(
+        LOG_FILE, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    ),
+]
+# Under a real console (start_debug.bat runs `python`, not `pythonw`) also
+# log to it — the stderr redirect below would otherwise leave it blank.
+if sys.stderr is not None:
+    _log_handlers.append(logging.StreamHandler(sys.stderr))
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.handlers.RotatingFileHandler(
-            LOG_FILE, maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8"
-        ),
-    ],
+    handlers=_log_handlers,
 )
 logger = logging.getLogger("talktrack")
 logger.info("TalkTrack starting — Python %s on %s", sys.version, platform.platform())
