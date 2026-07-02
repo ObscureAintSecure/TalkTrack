@@ -4,13 +4,31 @@ import json
 from app.transcription.transcriber import TranscriptSegment
 
 
-def _format_transcript(segments, speaker_names):
+_TRUNCATION_MARKER = "\n[... transcript truncated to fit the model's context ...]\n"
+
+
+def truncate_transcript(text, max_chars):
+    """Cap transcript text, keeping the head and tail.
+
+    Endings matter (action items and decisions cluster late in meetings), so
+    a head-only cut like the chat panel's would drop exactly the part the
+    action-item prompt needs. 60/40 head/tail split.
+    """
+    if max_chars is None or len(text) <= max_chars:
+        return text
+    budget = max_chars - len(_TRUNCATION_MARKER)
+    head = int(budget * 0.6)
+    tail = budget - head
+    return text[:head] + _TRUNCATION_MARKER + text[-tail:]
+
+
+def _format_transcript(segments, speaker_names, max_chars=None):
     lines = []
     for seg in segments:
         name = speaker_names.get(seg.speaker, seg.speaker) if seg.speaker else "Unknown"
         timestamp = f"[{seg.start:.1f}s]"
         lines.append(f"{timestamp} {name}: {seg.text}")
-    return "\n".join(lines)
+    return truncate_transcript("\n".join(lines), max_chars)
 
 
 def _format_notes(notes):
@@ -25,8 +43,10 @@ def _format_instruction(instruction):
     return f"\n\nADDITIONAL INSTRUCTIONS FROM USER:\n{instruction.strip()}"
 
 
-def build_summary_prompt(segments, speaker_names, notes="", instruction=""):
-    transcript_text = _format_transcript(segments, speaker_names)
+def build_summary_prompt(segments, speaker_names, notes="", instruction="",
+                         max_transcript_chars=None):
+    transcript_text = _format_transcript(segments, speaker_names,
+                                         max_chars=max_transcript_chars)
     notes_text = _format_notes(notes)
     instruction_text = _format_instruction(instruction)
     return (
@@ -41,8 +61,10 @@ def build_summary_prompt(segments, speaker_names, notes="", instruction=""):
     )
 
 
-def build_action_items_prompt(segments, speaker_names, notes="", instruction=""):
-    transcript_text = _format_transcript(segments, speaker_names)
+def build_action_items_prompt(segments, speaker_names, notes="", instruction="",
+                              max_transcript_chars=None):
+    transcript_text = _format_transcript(segments, speaker_names,
+                                         max_chars=max_transcript_chars)
     notes_text = _format_notes(notes)
     instruction_text = _format_instruction(instruction)
     return (

@@ -61,5 +61,44 @@ class TestParseActionItems(unittest.TestCase):
         self.assertEqual(items, [])
 
 
+class TestTranscriptTruncation(unittest.TestCase):
+    def test_short_text_unchanged(self):
+        from app.ai.summarizer import truncate_transcript
+        text = "short transcript"
+        self.assertEqual(truncate_transcript(text, 1000), text)
+
+    def test_long_text_keeps_head_and_tail(self):
+        from app.ai.summarizer import truncate_transcript
+        text = "HEAD " + ("x" * 10000) + " TAIL"
+        out = truncate_transcript(text, 2000)
+        self.assertLessEqual(len(out), 2000)
+        self.assertTrue(out.startswith("HEAD"))
+        self.assertTrue(out.endswith("TAIL"))
+        self.assertIn("truncated", out)
+
+    def test_build_summary_prompt_respects_cap(self):
+        from app.ai.summarizer import build_summary_prompt
+        from app.transcription.transcriber import TranscriptSegment
+        segments = [
+            TranscriptSegment(float(i), float(i + 1), "word " * 50, speaker="A")
+            for i in range(500)
+        ]
+        prompt = build_summary_prompt(
+            segments, {}, max_transcript_chars=5000
+        )
+        # Prompt = instructions + capped transcript; generous upper bound.
+        self.assertLess(len(prompt), 7000)
+        self.assertIn("truncated", prompt)
+
+    def test_build_summary_prompt_uncapped_by_default(self):
+        from app.ai.summarizer import build_summary_prompt
+        from app.transcription.transcriber import TranscriptSegment
+        segments = [
+            TranscriptSegment(0.0, 1.0, "hello world", speaker="A"),
+        ]
+        prompt = build_summary_prompt(segments, {})
+        self.assertNotIn("truncated", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

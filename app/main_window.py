@@ -22,7 +22,7 @@ from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
 from app.recording.recorder import Recorder, RecordingState
 from app.transcription.transcriber import TranscriptionWorker, TranscriptResult
-from app.transcription.diarizer import DiarizationWorker, SimpleDiarizer
+from app.transcription.diarizer import DiarizationWorker, SimpleDiarizeWorker
 from app.ui.recording_controls import RecordingControls
 from app.ui.meters_panel import MetersPanel
 from app.ui.source_selector import SourceSelector
@@ -50,6 +50,7 @@ class MainWindow(QMainWindow):
         self._current_session = None
         self._transcription_worker = None
         self._diarization_worker = None
+        self._simple_diarize_worker = None
         self._summarize_worker = None
         self._pending_transcriptions = []
         self._closing = False
@@ -745,6 +746,7 @@ class MainWindow(QMainWindow):
         return (
             (self._transcription_worker is not None and self._transcription_worker.isRunning())
             or (self._diarization_worker is not None and self._diarization_worker.isRunning())
+            or (self._simple_diarize_worker is not None and self._simple_diarize_worker.isRunning())
         )
 
     def _start_transcription(self, audio_path, session=None):
@@ -813,21 +815,41 @@ class MainWindow(QMainWindow):
             # Run full diarization with pyannote
             self._start_diarization(result, session)
         elif session:
-            # Try simple channel-based diarization
+            # Try simple channel-based diarization (off-thread — it reads
+            # both full WAVs, which freezes the UI on long recordings).
             audio_files = session.get("audio_files", {})
             mic_path = audio_files.get("mic")
             sys_path = audio_files.get("system")
 
             if mic_path and sys_path:
-                try:
-                    diarizer = SimpleDiarizer(mic_path, sys_path)
-                    result = diarizer.diarize(result)
-                except Exception as e:
-                    print(f"Simple diarization failed: {e}")
-
-            self._display_final_transcript(result, session)
+                self._start_simple_diarization(result, session, mic_path, sys_path)
+            else:
+                self._display_final_transcript(result, session)
         else:
             self._display_final_transcript(result, session)
+
+    def _start_simple_diarization(self, transcript_result, session, mic_path, sys_path):
+        self._simple_diarize_worker = SimpleDiarizeWorker(
+            mic_path, sys_path, transcript_result
+        )
+        self._simple_diarize_worker.session = session
+        self._simple_diarize_worker.finished.connect(self._on_simple_diarization_finished)
+        self._simple_diarize_worker.error.connect(self._on_simple_diarization_error)
+        self._simple_diarize_worker.start()
+        self.transcript_viewer.show_progress("Labeling speakers...")
+
+    def _on_simple_diarization_finished(self, result):
+        session = getattr(self._simple_diarize_worker, "session", None)
+        self._display_final_transcript(result, session)
+
+    def _on_simple_diarization_error(self, error_msg):
+        # Labeling is best-effort — show the unlabeled transcript.
+        worker = self._simple_diarize_worker
+        self.status_label.setText(error_msg)
+        if worker is not None:
+            self._display_final_transcript(
+                worker.transcript_result, getattr(worker, "session", None)
+            )
 
     def _start_diarization(self, transcript_result, session):
         if self._diarization_worker and self._diarization_worker.isRunning():
@@ -1407,14 +1429,17 @@ class MainWindow(QMainWindow):
 
             def run(self):
                 try:
+                    max_chars = self._provider.max_context_chars
                     summary_prompt = build_summary_prompt(
-                        self._segments, self._names, self._notes, self._instruction
+                        self._segments, self._names, self._notes, self._instruction,
+                        max_transcript_chars=max_chars,
                     )
                     summary = self._provider.complete(summary_prompt)
                     self.summary_ready.emit(summary)
 
                     actions_prompt = build_action_items_prompt(
-                        self._segments, self._names, self._notes, self._instruction
+                        self._segments, self._names, self._notes, self._instruction,
+                        max_transcript_chars=max_chars,
                     )
                     actions_response = self._provider.complete(actions_prompt)
                     actions = parse_action_items(actions_response)
@@ -1515,8 +1540,10 @@ class MainWindow(QMainWindow):
         workers = [
             self._transcription_worker,
             self._diarization_worker,
+            self._simple_diarize_worker,
             self._summarize_worker,
             self.chat_panel.active_worker(),
+            self.recordings_list.active_search_worker(),
         ]
         for worker in workers:
             if worker is None or not worker.isRunning():
