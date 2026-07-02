@@ -187,11 +187,12 @@ class Recorder(QObject):
                     subprocess.run(
                         ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame",
                          "-qscale:a", "2", mp3_path],
-                        capture_output=True, check=True,
+                        capture_output=True, check=True, timeout=300,
                     )
                     mp3_files[key + "_mp3"] = mp3_path
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    pass  # FFmpeg not available or conversion failed
+                except (subprocess.CalledProcessError, FileNotFoundError,
+                        subprocess.TimeoutExpired):
+                    pass  # FFmpeg missing, failed, or hung — keep the WAV
         audio_files.update(mp3_files)
 
     def _start_timer(self):
