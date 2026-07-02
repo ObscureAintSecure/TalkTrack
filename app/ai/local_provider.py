@@ -4,11 +4,14 @@ from app.ai.provider import AIProvider
 
 
 class LocalProvider(AIProvider):
+    # llama-cpp runs with n_ctx=4096 tokens; ~8k chars leaves room for the
+    # instruction and the completion.
+    max_context_chars = 8_000
+
     def __init__(self, model_path: str, embed_model: str = "all-MiniLM-L6-v2"):
         self._model_path = model_path
         self._embed_model_name = embed_model
         self._llm = None
-        self._embedder = None
 
     def _get_llm(self):
         if self._llm is None:
@@ -21,10 +24,8 @@ class LocalProvider(AIProvider):
         return self._llm
 
     def _get_embedder(self):
-        if self._embedder is None:
-            from sentence_transformers import SentenceTransformer
-            self._embedder = SentenceTransformer(self._embed_model_name)
-        return self._embedder
+        from app.ai.provider import get_sentence_transformer
+        return get_sentence_transformer(self._embed_model_name)
 
     def complete(self, prompt: str, context: str = "") -> str:
         llm = self._get_llm()

@@ -13,12 +13,50 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QMenu, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QAction
 
 from app.ui.search_bar import SearchBar
 
 logger = logging.getLogger(__name__)
+
+
+class _SearchWorker(QThread):
+    """Runs recording search off the GUI thread.
+
+    Semantic search loads an embedding model and embeds the whole corpus —
+    seconds to minutes on first use. Inline, that froze the window.
+    """
+
+    results_ready = pyqtSignal(list)
+
+    def __init__(self, recordings_dir, query, is_semantic):
+        super().__init__()
+        self._recordings_dir = recordings_dir
+        self._query = query
+        self._is_semantic = is_semantic
+
+    def run(self):
+        from app.ai.search_index import load_all_transcripts, text_search
+        transcripts = load_all_transcripts(self._recordings_dir)
+
+        results = None
+        if self._is_semantic:
+            try:
+                from app.ai.search_index import semantic_search
+                from app.ai.provider_factory import create_provider
+                from app.utils.config import Config
+                config = Config()
+                ai_config = config.data.get("ai", {})
+                provider = create_provider(ai_config)
+                if provider is not None:
+                    results = semantic_search(self._query, transcripts, provider)
+            except Exception:
+                logger.exception("Semantic search failed — falling back to text")
+        if results is None:
+            results = text_search(self._query, transcripts)
+
+        self.results_ready.emit(results)
 
 
 def _rmtree_robust(directory, retries=4, initial_delay=0.1):
@@ -68,8 +106,14 @@ class RecordingsList(QWidget):
         super().__init__(parent)
         self.recordings_dir = Path(recordings_dir)
         self._recordings = []
+        self._search_worker = None
+        self._pending_search = None
         self._setup_ui()
         self.refresh()
+
+    def active_search_worker(self):
+        """Return the in-flight search worker, if any (for shutdown handling)."""
+        return self._search_worker
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -260,27 +304,25 @@ class RecordingsList(QWidget):
             os.startfile(audio_path)
 
     def _on_search(self, query, is_semantic):
-        from app.ai.search_index import load_all_transcripts, text_search
-        transcripts = load_all_transcripts(self.recordings_dir)
+        # Only the latest query matters; typing while a search runs replaces
+        # the pending one, and the runner picks it up when the worker frees.
+        self._pending_search = (query, is_semantic)
+        self._maybe_start_search()
 
-        if is_semantic:
-            try:
-                from app.ai.search_index import semantic_search
-                from app.ai.provider_factory import create_provider
-                from app.utils.config import Config
-                config = Config()
-                ai_config = config.data.get("ai", {})
-                provider = create_provider(ai_config)
-                if provider is not None:
-                    results = semantic_search(query, transcripts, provider)
-                else:
-                    results = text_search(query, transcripts)
-            except Exception:
-                results = text_search(query, transcripts)
-        else:
-            results = text_search(query, transcripts)
+    def _maybe_start_search(self):
+        if self._search_worker is not None and self._search_worker.isRunning():
+            return
+        if self._pending_search is None:
+            return
+        query, is_semantic = self._pending_search
+        self._pending_search = None
+        self._search_worker = _SearchWorker(self.recordings_dir, query, is_semantic)
+        self._search_worker.results_ready.connect(self._on_search_finished)
+        self._search_worker.start()
 
+    def _on_search_finished(self, results):
         self._show_search_results(results)
+        self._maybe_start_search()
 
     def _show_search_results(self, results):
         self.list_widget.clear()

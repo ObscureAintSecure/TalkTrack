@@ -113,6 +113,46 @@ class TestProviderInterface(unittest.TestCase):
         with self.assertRaises(TypeError):
             AIProvider()
 
+    def test_cloud_providers_have_generous_context_limit(self):
+        from app.ai.provider import AIProvider
+        self.assertGreaterEqual(AIProvider.max_context_chars, 50000)
+
+    def test_local_provider_has_small_context_limit(self):
+        from app.ai.local_provider import LocalProvider
+        provider = LocalProvider(model_path="x.gguf")
+        self.assertLessEqual(provider.max_context_chars, 10000)
+
+
+class TestSentenceTransformerCache(unittest.TestCase):
+    def test_same_model_name_loads_once(self):
+        mock_st_module = MagicMock()
+        with patch.dict(sys.modules, {"sentence_transformers": mock_st_module}):
+            from app.ai import provider as provider_mod
+            provider_mod._SENTENCE_TRANSFORMER_CACHE.clear()
+            m1 = provider_mod.get_sentence_transformer("all-MiniLM-L6-v2")
+            m2 = provider_mod.get_sentence_transformer("all-MiniLM-L6-v2")
+        self.assertIs(m1, m2)
+        self.assertEqual(mock_st_module.SentenceTransformer.call_count, 1)
+
+    def test_claude_provider_embed_uses_shared_cache(self):
+        mock_anthropic = MagicMock()
+        mock_st_module = MagicMock()
+        with patch.dict(sys.modules, {
+            "anthropic": mock_anthropic,
+            "sentence_transformers": mock_st_module,
+        }):
+            import importlib
+            import app.ai.claude_provider
+            importlib.reload(app.ai.claude_provider)
+            from app.ai.claude_provider import ClaudeProvider
+            from app.ai import provider as provider_mod
+            provider_mod._SENTENCE_TRANSFORMER_CACHE.clear()
+
+            p = ClaudeProvider(api_key="k", model="claude-sonnet-4-6")
+            p.embed(["a"])
+            p.embed(["b"])
+        self.assertEqual(mock_st_module.SentenceTransformer.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

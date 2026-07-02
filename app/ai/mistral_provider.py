@@ -22,7 +22,7 @@ class MistralProvider(AIProvider):
         return response.choices[0].message.content
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        from sentence_transformers import SentenceTransformer
-        model = SentenceTransformer("all-MiniLM-L6-v2")
+        from app.ai.provider import get_sentence_transformer
+        model = get_sentence_transformer("all-MiniLM-L6-v2")
         embeddings = model.encode(texts)
         return [e.tolist() for e in embeddings]
