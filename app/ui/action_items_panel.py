@@ -18,6 +18,7 @@ class ActionItemWidget(QWidget):
         layout.setContentsMargins(4, 2, 4, 2)
 
         self._checkbox = QCheckBox()
+        self._checkbox.setChecked(bool(item.get("completed", False)))
         self._checkbox.toggled.connect(lambda checked: self.toggled.emit(index, checked))
         layout.addWidget(self._checkbox)
 
@@ -112,6 +113,19 @@ class ActionItemsPanel(QWidget):
         self._status.setVisible(True)
         self._gen_btn.setVisible(False)
         self._scroll.setVisible(False)
+
+    def set_error(self, message="Action item extraction failed."):
+        """Restore from the loading state after a failed extraction."""
+        if self._items:
+            # Previous items still exist — bring them back.
+            self._scroll.setVisible(True)
+            self._status.setVisible(False)
+            self._gen_btn.setText("Regenerate")
+        else:
+            self._status.setText(message)
+            self._status.setVisible(True)
+            self._gen_btn.setText("Extract Action Items")
+        self._gen_btn.setVisible(True)
 
     def _on_toggled(self, index, checked):
         if 0 <= index < len(self._items):

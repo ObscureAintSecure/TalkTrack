@@ -90,6 +90,21 @@ class SummaryPanel(QWidget):
         self._instruction_input.setVisible(False)
         self._text.setVisible(False)
 
+    def set_error(self, message="Summary generation failed."):
+        """Restore from the loading state after a failed generation."""
+        if self._text.toPlainText():
+            # A previous summary exists — bring it back.
+            self._text.setVisible(True)
+            self._copy_btn.setVisible(True)
+            self._instruction_input.setVisible(True)
+            self._status.setVisible(False)
+            self._gen_btn.setText("Regenerate")
+        else:
+            self._status.setText(message)
+            self._status.setVisible(True)
+            self._gen_btn.setText("Generate Summary")
+        self._gen_btn.setVisible(True)
+
     def get_text(self):
         return self._text.toPlainText()
 

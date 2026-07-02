@@ -729,10 +729,13 @@ class SettingsDialog(QDialog):
             if provider is None:
                 QMessageBox.information(self, "AI", "No provider selected.")
                 return
-            if provider.test_connection():
+            # Call complete() directly (not test_connection, which swallows
+            # the exception) so the real auth/model error reaches the dialog.
+            result = provider.complete("Say 'ok'.", "")
+            if result:
                 QMessageBox.information(self, "AI", "Connection successful!")
             else:
-                QMessageBox.warning(self, "AI", "Connection failed.")
+                QMessageBox.warning(self, "AI", "Connection failed: empty response.")
         except Exception as e:
             QMessageBox.critical(self, "AI Error", str(e))
 

@@ -50,6 +50,7 @@ class MainWindow(QMainWindow):
         self._current_session = None
         self._transcription_worker = None
         self._diarization_worker = None
+        self._summarize_worker = None
         self._mic_muted = False
         self._pending_gain = None  # holds latest slider value awaiting debounced save
         self._gain_save_timer = QTimer(self)
@@ -336,6 +337,7 @@ class MainWindow(QMainWindow):
         # Summary / action items
         self.summary_panel.regenerate_requested.connect(self._regenerate_summary)
         self.action_items_panel.regenerate_requested.connect(self._regenerate_summary)
+        self.action_items_panel.items_changed.connect(self._on_action_items_changed)
 
     def _start_recording(self):
         # Any pending auto-record arm becomes moot once recording starts.
@@ -793,11 +795,12 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.show_progress("Running speaker diarization...")
 
     def _on_diarization_error(self, error_msg):
-        self.status_label.setText("Diarization failed - showing transcript without speakers")
-        # Still show the transcript without speaker labels
-        if self._transcription_worker:
-            # Display whatever we have
+        # Transcription itself succeeded — render it without speaker labels.
+        if self._diarization_worker is not None:
+            self._display_final_transcript(self._diarization_worker.transcript_result)
+        else:
             self.transcript_viewer.hide_progress()
+        self.status_label.setText("Diarization failed - showing transcript without speakers")
         if self._is_hidden_to_tray():
             self._flag_error_notification()
         else:
@@ -1254,10 +1257,14 @@ class MainWindow(QMainWindow):
         from app.ai.provider_factory import create_provider
         from PyQt6.QtCore import QThread, pyqtSignal
 
+        if self._summarize_worker is not None and self._summarize_worker.isRunning():
+            return
+
         ai_config = self.config.data.get("ai", {})
         try:
             provider = create_provider(ai_config)
-        except Exception:
+        except Exception as e:
+            self.status_label.setText(f"AI provider error: {e}")
             return
         if provider is None:
             return
@@ -1303,8 +1310,13 @@ class MainWindow(QMainWindow):
         )
         self._summarize_worker.summary_ready.connect(self._on_summary_ready)
         self._summarize_worker.actions_ready.connect(self._on_actions_ready)
-        self._summarize_worker.error.connect(lambda e: self.status_label.setText(f"AI error: {e}"))
+        self._summarize_worker.error.connect(self._on_summarize_error)
         self._summarize_worker.start()
+
+    def _on_summarize_error(self, error_msg):
+        self.status_label.setText(f"AI error: {error_msg}")
+        self.summary_panel.set_error()
+        self.action_items_panel.set_error()
 
     def _on_summary_ready(self, summary):
         self.summary_panel.set_summary(summary)
@@ -1315,10 +1327,16 @@ class MainWindow(QMainWindow):
 
     def _on_actions_ready(self, items):
         self.action_items_panel.set_items(items)
+        self._on_action_items_changed(items)
+
+    def _on_action_items_changed(self, items):
         if self._current_session:
             path = Path(self._current_session["directory"]) / "action_items.json"
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(items, f, indent=2)
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(items, f, indent=2)
+            except OSError:
+                self.status_label.setText("Failed to save action items.")
 
     def changeEvent(self, event):
         if event.type() == QEvent.Type.WindowStateChange:
