@@ -147,6 +147,10 @@ class ProcessCaptureStream:
         self.native_channels = 0
         self.native_format = "float32"
         self.last_error = None
+        # True once any non-silent sample has arrived. Conferencing apps that
+        # opt out of process-loopback deliver only SILENT-flagged packets, so
+        # this flag never flips — the UI uses it to warn the user.
+        self.received_audio = False
         self._client = None
         self._capture_client = None
         self._native_frame_bytes = None
@@ -249,6 +253,8 @@ class ProcessCaptureStream:
                 if self.native_channels > 1:
                     arr = arr.reshape(-1, self.native_channels).mean(axis=1)
                 mono_native = arr.astype(np.float32)
+                if not self.received_audio and np.any(mono_native):
+                    self.received_audio = True
 
             resampled = self._resampler.push(mono_native)
             if resampled.size > 0:
@@ -512,6 +518,13 @@ class ProcessAudioCapture:
     @property
     def is_active(self):
         return self._running and any(s.is_active for s in self._streams.values())
+
+    @property
+    def has_received_audio(self):
+        """True once any stream has produced a non-silent sample."""
+        return any(
+            getattr(s, "received_audio", False) for s in self._streams.values()
+        )
 
     @property
     def active_pids(self):

@@ -506,5 +506,73 @@ class TestProcessCaptureStreamRead(unittest.TestCase):
         self.assertEqual(s.last_error, "AUDCLNT_E_DEVICE_INVALIDATED")
 
 
+class TestReceivedAudioFlag(unittest.TestCase):
+    """ProcessCaptureStream tracks whether any real (non-silent) audio arrived."""
+
+    def _make_stream_with_packets(self, packets):
+        from app.recording.process_audio_capture import ProcessCaptureStream
+
+        def fake_activate(pid, timeout_ms=5000):
+            client = type("C", (), {})()
+            client.native_rate = 48000
+            client.native_channels = 2
+            client.native_format = "float32"
+            return client, 0
+
+        s = ProcessCaptureStream(pid=1, sample_rate=16000, activator=fake_activate)
+        s.activate()
+        s._packet_source = iter(packets)
+        return s
+
+    def test_starts_false(self):
+        s = self._make_stream_with_packets([])
+        self.assertFalse(s.received_audio)
+
+    def test_silent_flagged_packets_do_not_set_flag(self):
+        pkt = {"raw": b"\x00" * 480 * 2 * 4, "frames": 480, "flags": 0x2}
+        s = self._make_stream_with_packets([pkt])
+        s.read_available()
+        self.assertFalse(s.received_audio)
+
+    def test_all_zero_unflagged_packet_does_not_set_flag(self):
+        zeros = np.zeros(480 * 2, dtype=np.float32)
+        pkt = {"raw": zeros.tobytes(), "frames": 480, "flags": 0}
+        s = self._make_stream_with_packets([pkt])
+        s.read_available()
+        self.assertFalse(s.received_audio)
+
+    def test_real_audio_sets_flag(self):
+        audio = np.full(480 * 2, 0.25, dtype=np.float32)
+        pkt = {"raw": audio.tobytes(), "frames": 480, "flags": 0}
+        s = self._make_stream_with_packets([pkt])
+        s.read_available()
+        self.assertTrue(s.received_audio)
+
+
+class TestHasReceivedAudioAggregate(unittest.TestCase):
+    def test_false_when_no_stream_received(self):
+        from app.recording.process_audio_capture import ProcessAudioCapture
+        cap = ProcessAudioCapture(pids=[1, 2], sample_rate=16000)
+        a, b = FakeStream(pid=1), FakeStream(pid=2)
+        a.received_audio = False
+        b.received_audio = False
+        cap._streams = {1: a, 2: b}
+        self.assertFalse(cap.has_received_audio)
+
+    def test_true_when_any_stream_received(self):
+        from app.recording.process_audio_capture import ProcessAudioCapture
+        cap = ProcessAudioCapture(pids=[1, 2], sample_rate=16000)
+        a, b = FakeStream(pid=1), FakeStream(pid=2)
+        a.received_audio = False
+        b.received_audio = True
+        cap._streams = {1: a, 2: b}
+        self.assertTrue(cap.has_received_audio)
+
+    def test_false_with_no_streams(self):
+        from app.recording.process_audio_capture import ProcessAudioCapture
+        cap = ProcessAudioCapture(pids=[], sample_rate=16000)
+        self.assertFalse(cap.has_received_audio)
+
+
 if __name__ == "__main__":
     unittest.main()

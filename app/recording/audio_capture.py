@@ -79,9 +79,14 @@ class AudioStream:
     def stop(self):
         self._recording = False
         if self._stream:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                logger.exception("Error closing audio stream on device %s",
+                                 self.device_index)
+            finally:
+                self._stream = None
 
     def get_audio_data(self):
         """Return all recorded audio as a numpy array."""
@@ -167,28 +172,35 @@ class LoopbackStream:
         self._paused = False
         self._all_chunks = []
 
-        loopback_dev = self._find_loopback_device()
-        self._native_rate = int(loopback_dev["defaultSampleRate"])
-        self._native_channels = loopback_dev["maxInputChannels"]
+        try:
+            loopback_dev = self._find_loopback_device()
+            self._native_rate = int(loopback_dev["defaultSampleRate"])
+            self._native_channels = loopback_dev["maxInputChannels"]
 
-        logger.info(
-            "WASAPI loopback: %s (index=%d, rate=%d, ch=%d)",
-            loopback_dev["name"], loopback_dev["index"],
-            self._native_rate, self._native_channels,
-        )
+            logger.info(
+                "WASAPI loopback: %s (index=%d, rate=%d, ch=%d)",
+                loopback_dev["name"], loopback_dev["index"],
+                self._native_rate, self._native_channels,
+            )
 
-        self._resampler = _Resampler(self._native_rate, self._target_rate)
+            self._resampler = _Resampler(self._native_rate, self._target_rate)
 
-        self._stream = self._pa.open(
-            format=pyaudio.paFloat32,
-            channels=self._native_channels,
-            rate=self._native_rate,
-            input=True,
-            input_device_index=loopback_dev["index"],
-            frames_per_buffer=1024,
-            stream_callback=self._callback,
-        )
-        self._stream.start_stream()
+            self._stream = self._pa.open(
+                format=pyaudio.paFloat32,
+                channels=self._native_channels,
+                rate=self._native_rate,
+                input=True,
+                input_device_index=loopback_dev["index"],
+                frames_per_buffer=1024,
+                stream_callback=self._callback,
+            )
+            self._stream.start_stream()
+        except Exception:
+            # _find_loopback_device creates self._pa before it can fail —
+            # don't leak the PyAudio instance on any startup error.
+            self._recording = False
+            self.stop()
+            raise
 
     def _callback(self, in_data, frame_count, time_info, status):
         import pyaudiowpatch as pyaudio
@@ -228,12 +240,20 @@ class LoopbackStream:
     def stop(self):
         self._recording = False
         if self._stream:
-            self._stream.stop_stream()
-            self._stream.close()
-            self._stream = None
+            try:
+                self._stream.stop_stream()
+                self._stream.close()
+            except Exception:
+                logger.exception("Error closing loopback stream")
+            finally:
+                self._stream = None
         if self._pa:
-            self._pa.terminate()
-            self._pa = None
+            try:
+                self._pa.terminate()
+            except Exception:
+                logger.exception("Error terminating PyAudio")
+            finally:
+                self._pa = None
 
     def get_audio_data(self):
         if not self._all_chunks:
@@ -393,40 +413,57 @@ class DualAudioCapture:
             if self._mic_level_callback is not None:
                 self._mic_level_callback(chunk)
 
-        # Microphone capture (sounddevice)
-        if self.mic_device is not None:
-            self.mic_stream = AudioStream(
-                device_index=self.mic_device,
-                sample_rate=self.sample_rate,
-                channels=1,
-                level_callback=_mic_cb,
-            )
-            self.mic_stream.start()
-            if self._muted:
-                self.mic_stream.set_muted(True)
-            if self.mic_gain != 1.0:
-                self.mic_stream.set_gain(self.mic_gain)
-            logger.info("Mic stream started on device %s", self.mic_device)
-        else:
-            logger.warning("No mic device selected")
+        # Microphone capture (sounddevice). A mic failure must not orphan the
+        # already-running system capture (COM clients / PyAudio / mixer thread).
+        try:
+            if self.mic_device is not None:
+                self.mic_stream = AudioStream(
+                    device_index=self.mic_device,
+                    sample_rate=self.sample_rate,
+                    channels=1,
+                    level_callback=_mic_cb,
+                )
+                self.mic_stream.start()
+                if self._muted:
+                    self.mic_stream.set_muted(True)
+                if self.mic_gain != 1.0:
+                    self.mic_stream.set_gain(self.mic_gain)
+                logger.info("Mic stream started on device %s", self.mic_device)
+            else:
+                logger.warning("No mic device selected")
 
-        # Second microphone capture (optional)
-        if self.mic_device_2 is not None:
-            self.mic_stream_2 = AudioStream(
-                device_index=self.mic_device_2,
-                sample_rate=self.sample_rate,
-                channels=1,
-                level_callback=_mic_cb,
-            )
-            self.mic_stream_2.start()
-            if self._muted:
-                self.mic_stream_2.set_muted(True)
-            if self.mic_gain != 1.0:
-                self.mic_stream_2.set_gain(self.mic_gain)
-            logger.info("Mic stream 2 started on device %s", self.mic_device_2)
+            # Second microphone capture (optional)
+            if self.mic_device_2 is not None:
+                self.mic_stream_2 = AudioStream(
+                    device_index=self.mic_device_2,
+                    sample_rate=self.sample_rate,
+                    channels=1,
+                    level_callback=_mic_cb,
+                )
+                self.mic_stream_2.start()
+                if self._muted:
+                    self.mic_stream_2.set_muted(True)
+                if self.mic_gain != 1.0:
+                    self.mic_stream_2.set_gain(self.mic_gain)
+                logger.info("Mic stream 2 started on device %s", self.mic_device_2)
+        except Exception:
+            self._stop_streams_quietly()
+            raise
 
         self._recording = True
         self._start_time = time.time()
+
+    def _stop_streams_quietly(self):
+        """Best-effort stop of every started stream; never raises."""
+        for stream in (self.mic_stream, self.mic_stream_2, self.system_stream):
+            if stream is not None:
+                try:
+                    stream.stop()
+                except Exception:
+                    logger.exception("Error stopping stream during cleanup")
+        self.mic_stream = None
+        self.mic_stream_2 = None
+        self.system_stream = None
 
     def pause(self):
         if self.mic_stream:
@@ -452,7 +489,12 @@ class DualAudioCapture:
         self._silence_fired = False  # allow re-detection after resume
 
     def stop(self):
-        """Stop recording and return paths to saved audio files."""
+        """Stop recording and return paths to saved audio files.
+
+        Every stop/save step is individually guarded: a failing device (e.g.
+        mic unplugged mid-call) or file write must not prevent stopping the
+        other streams or saving the other tracks.
+        """
         self._recording = False
         if self._start_time:
             self._elapsed += time.time() - self._start_time
@@ -460,29 +502,42 @@ class DualAudioCapture:
 
         results = {"mic": None, "system": None, "combined": None}
 
-        if self.mic_stream:
-            self.mic_stream.stop()
-        if self.mic_stream_2:
-            self.mic_stream_2.stop()
+        # Stop all streams first so nothing keeps capturing while we save.
+        for label, stream in (("mic", self.mic_stream),
+                              ("mic 2", self.mic_stream_2),
+                              ("system", self.system_stream)):
+            if stream is not None:
+                try:
+                    stream.stop()
+                except Exception:
+                    logger.exception("Failed to stop %s stream", label)
 
         # Mix mic streams and save
-        mic_data = self._get_mixed_mic_data()
-        if mic_data.size > 0:
-            mic_path = self.output_dir / "mic_audio.wav"
-            sf.write(str(mic_path), mic_data, self.sample_rate)
-            results["mic"] = str(mic_path)
+        try:
+            mic_data = self._get_mixed_mic_data()
+            if mic_data.size > 0:
+                mic_path = self.output_dir / "mic_audio.wav"
+                sf.write(str(mic_path), mic_data, self.sample_rate)
+                results["mic"] = str(mic_path)
+        except Exception:
+            logger.exception("Failed to save mic audio")
 
         if self.system_stream:
-            self.system_stream.stop()
-            sys_path = self.output_dir / "system_audio.wav"
-            results["system"] = self.system_stream.save_to_file(sys_path)
+            try:
+                sys_path = self.output_dir / "system_audio.wav"
+                results["system"] = self.system_stream.save_to_file(sys_path)
+            except Exception:
+                logger.exception("Failed to save system audio")
 
         # Create combined audio for transcription
-        combined = self._create_combined_audio()
-        if combined is not None:
-            combined_path = self.output_dir / "combined_audio.wav"
-            sf.write(str(combined_path), combined, self.sample_rate)
-            results["combined"] = str(combined_path)
+        try:
+            combined = self._create_combined_audio()
+            if combined is not None:
+                combined_path = self.output_dir / "combined_audio.wav"
+                sf.write(str(combined_path), combined, self.sample_rate)
+                results["combined"] = str(combined_path)
+        except Exception:
+            logger.exception("Failed to create combined audio")
 
         return results
 
@@ -591,6 +646,18 @@ class DualAudioCapture:
                 self._silence_callback(now - self._silent_since)
         else:
             self._silent_since = None
+
+    def system_audio_received(self):
+        """True once the system stream has produced any non-silent audio.
+
+        Only meaningful for per-app capture (streams exposing
+        has_received_audio). Legacy loopback and no-system configurations
+        return True so callers never warn.
+        """
+        stream = self.system_stream
+        if stream is None or not hasattr(stream, "has_received_audio"):
+            return True
+        return bool(stream.has_received_audio)
 
     def get_elapsed_time(self):
         """Return elapsed recording time in seconds."""

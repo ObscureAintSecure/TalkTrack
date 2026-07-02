@@ -53,6 +53,7 @@ class MainWindow(QMainWindow):
         self._summarize_worker = None
         self._pending_transcriptions = []
         self._closing = False
+        self._silent_capture_warned = False
         self._mic_muted = False
         self._pending_gain = None  # holds latest slider value awaiting debounced save
         self._gain_save_timer = QTimer(self)
@@ -345,6 +346,7 @@ class MainWindow(QMainWindow):
         # Any pending auto-record arm becomes moot once recording starts.
         if self._auto_record_timer.isActive():
             self._auto_record_timer.stop()
+        self._silent_capture_warned = False
 
         mic = self.source_selector.get_selected_mic()
         mic2 = self.source_selector.get_selected_mic2()
@@ -643,6 +645,38 @@ class MainWindow(QMainWindow):
     def _on_recording_tick(self, seconds):
         if hasattr(self, "tray") and self.tray.is_supported():
             self.tray.set_state(self.recorder.state, int(seconds))
+        self._check_silent_capture(seconds)
+
+    def _check_silent_capture(self, seconds):
+        """Warn once if per-app capture has produced zero audio.
+
+        Conferencing apps (Teams/Zoom/WebEx) opt their call audio out of
+        process-loopback: activation succeeds but only silence arrives, and
+        the user finds out after the meeting. 15s in with nothing received,
+        tell them now.
+        """
+        if self._silent_capture_warned or seconds < 15:
+            return
+        if self.recorder.state != RecordingState.RECORDING:
+            return
+        capture = getattr(self.recorder, "_capture", None)
+        if capture is None or capture.system_audio_received():
+            return
+        self._silent_capture_warned = True
+        msg = (
+            "No audio has been received from the selected app(s) yet.\n\n"
+            "Conferencing apps (Teams, Zoom, WebEx) block per-app capture "
+            "of their call audio. To record a call, stop this recording and "
+            "switch the audio source to legacy system audio mode."
+        )
+        self.status_label.setText(
+            "Warning: no audio received from selected app(s) — "
+            "see Audio Sources."
+        )
+        if self._is_hidden_to_tray():
+            self._flag_error_notification()
+        else:
+            QMessageBox.warning(self, "Capturing Silence", msg)
 
     def _is_hidden_to_tray(self):
         return hasattr(self, "tray") and self.tray.is_supported() and self.isHidden()

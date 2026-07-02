@@ -339,6 +339,141 @@ class TestDualAudioCaptureDispatch(unittest.TestCase):
         self.assertIsNone(cap.system_stream)
 
 
+class TestStartFailureCleanup(unittest.TestCase):
+    """A mic-start failure must stop the already-started system stream."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.output_dir = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_mic_failure_stops_per_app_system_stream(self):
+        from app.recording.audio_capture import DualAudioCapture
+
+        with patch("app.recording.audio_capture.ProcessAudioCapture") as MockPAC, \
+             patch("app.recording.audio_capture.AudioStream") as MockMic:
+            system = MagicMock()
+            system.start.return_value = {"total": 1, "active": 1, "failures": {}}
+            MockPAC.return_value = system
+            mic = MagicMock()
+            mic.start.side_effect = RuntimeError("mic busy")
+            MockMic.return_value = mic
+
+            cap = DualAudioCapture(
+                mic_device=1, loopback_device=None,
+                sample_rate=16000, capture_mode="per_app", app_pids=[123],
+            )
+            with self.assertRaises(RuntimeError):
+                cap.start(output_dir=self.output_dir)
+            system.stop.assert_called_once()
+
+    def test_second_mic_failure_stops_first_mic(self):
+        from app.recording.audio_capture import DualAudioCapture
+
+        mic1 = MagicMock()
+        mic2 = MagicMock()
+        mic2.start.side_effect = RuntimeError("mic 2 busy")
+        with patch("app.recording.audio_capture.AudioStream",
+                   side_effect=[mic1, mic2]):
+            cap = DualAudioCapture(
+                mic_device=1, mic_device_2=2, loopback_device=None,
+                sample_rate=16000, capture_mode="legacy",
+            )
+            with self.assertRaises(RuntimeError):
+                cap.start(output_dir=self.output_dir)
+            mic1.stop.assert_called_once()
+
+
+class TestStopResilience(unittest.TestCase):
+    """One failing stream or file write must not abort the rest of stop()."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.output_dir = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _make_capture(self):
+        from pathlib import Path
+        from app.recording.audio_capture import DualAudioCapture
+        cap = DualAudioCapture(mic_device=None, loopback_device=None)
+        cap.output_dir = Path(self.output_dir)
+        return cap
+
+    def test_mic_stop_failure_still_stops_and_saves_system(self):
+        import os
+        cap = self._make_capture()
+        mic = MagicMock()
+        mic.stop.side_effect = RuntimeError("device unplugged")
+        mic.get_audio_data.return_value = np.array([], dtype=np.float32)
+        system = MagicMock()
+        sys_path = os.path.join(self.output_dir, "system_audio.wav")
+        system.save_to_file.return_value = sys_path
+        system.get_audio_data.return_value = np.zeros(16, dtype=np.float32)
+        cap.mic_stream = mic
+        cap.system_stream = system
+
+        results = cap.stop()
+
+        system.stop.assert_called_once()
+        self.assertEqual(results["system"], sys_path)
+        self.assertIsNone(results["mic"])
+
+    def test_mic_write_failure_still_saves_system(self):
+        import os
+        cap = self._make_capture()
+        mic = MagicMock()
+        mic.get_audio_data.return_value = np.full(16, 0.5, dtype=np.float32)
+        system = MagicMock()
+        sys_path = os.path.join(self.output_dir, "system_audio.wav")
+        system.save_to_file.return_value = sys_path
+        system.get_audio_data.return_value = np.zeros(16, dtype=np.float32)
+        cap.mic_stream = mic
+        cap.system_stream = system
+
+        with patch("app.recording.audio_capture.sf.write",
+                   side_effect=OSError("disk full")):
+            results = cap.stop()
+
+        system.stop.assert_called_once()
+        self.assertEqual(results["system"], sys_path)
+        self.assertIsNone(results["mic"])
+        self.assertIsNone(results["combined"])
+
+
+class TestSystemAudioReceived(unittest.TestCase):
+    """system_audio_received() flags per-app captures that never got audio."""
+
+    def _make_capture(self):
+        from app.recording.audio_capture import DualAudioCapture
+        return DualAudioCapture(mic_device=None, loopback_device=None)
+
+    def test_no_system_stream_reports_received(self):
+        cap = self._make_capture()
+        cap.system_stream = None
+        self.assertTrue(cap.system_audio_received())
+
+    def test_legacy_stream_without_flag_reports_received(self):
+        cap = self._make_capture()
+        cap.system_stream = object()   # LoopbackStream has no flag
+        self.assertTrue(cap.system_audio_received())
+
+    def test_per_app_stream_silent_reports_false(self):
+        import types
+        cap = self._make_capture()
+        cap.system_stream = types.SimpleNamespace(has_received_audio=False)
+        self.assertFalse(cap.system_audio_received())
+
+    def test_per_app_stream_with_audio_reports_true(self):
+        import types
+        cap = self._make_capture()
+        cap.system_stream = types.SimpleNamespace(has_received_audio=True)
+        self.assertTrue(cap.system_audio_received())
+
+
 class TestSilenceDetectionMicGuard(unittest.TestCase):
     """Silence auto-stop must not fire while the mic is active.
 
