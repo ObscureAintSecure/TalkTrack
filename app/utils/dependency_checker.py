@@ -23,8 +23,72 @@ class DependencyChecker:
             self.check_whisper_model(),
             self.check_hf_token(),
             self.check_pyannote_models(),
+            self.check_package_metadata(),
             self.check_windows_version(),
         ]
+
+    def check_package_metadata(self, packages=("numpy", "torch", "faster-whisper")):
+        """Detect packages whose installed metadata is damaged or missing.
+
+        An interrupted installer (e.g. a killed uv sync) can gut a package's
+        dist-info while leaving it importable: importlib.metadata then reports
+        no version and libraries like transformers fail with the cryptic
+        "Unable to compare versions ... found=None". Say it plainly instead.
+        """
+        import importlib
+        import importlib.metadata as md
+
+        damaged = []
+        missing = []
+        for pkg in packages:
+            try:
+                version = md.version(pkg)
+            except md.PackageNotFoundError:
+                version = None
+            except Exception:
+                version = None
+            if version:
+                continue
+            import_name = pkg.replace("-", "_")
+            try:
+                importlib.import_module(import_name)
+                damaged.append(pkg)
+            except Exception:
+                missing.append(pkg)
+
+        if damaged:
+            names = ", ".join(damaged)
+            return {
+                "name": "Package Metadata",
+                "passed": False,
+                "level": "critical",
+                "message": (
+                    f"Damaged install metadata for: {names} — the package "
+                    "imports but its version is unreadable (usually an "
+                    "interrupted install). Transcription/AI features will fail."
+                ),
+                "action": (
+                    "Close TalkTrack and force-reinstall into the venv:\n"
+                    f"uv pip install --python .venv\\Scripts\\python.exe "
+                    f"--force-reinstall {' '.join(damaged)}"
+                ),
+            }
+        if missing:
+            names = ", ".join(missing)
+            return {
+                "name": "Package Metadata",
+                "passed": False,
+                "level": "warn",
+                "message": f"Not installed: {names}.",
+                "action": "Run start.bat to install dependencies.",
+            }
+        return {
+            "name": "Package Metadata",
+            "passed": True,
+            "level": "critical",
+            "message": "Install metadata intact for " + ", ".join(packages) + ".",
+            "action": None,
+        }
 
     def check_microphone(self):
         """Check if any microphone input devices are available."""
@@ -110,7 +174,10 @@ class DependencyChecker:
                 result["cuda_version"] = torch.version.cuda or ""
                 return result
             # torch installed but no CUDA — check if GPU exists via subprocess
-        except ImportError:
+        except Exception:
+            # Not just ImportError: a broken torch install raises OSError
+            # (DLL load) or RuntimeError on import — fall through to nvidia-smi
+            # rather than taking down the whole status panel.
             pass
 
         # Fallback: detect NVIDIA GPU via nvidia-smi

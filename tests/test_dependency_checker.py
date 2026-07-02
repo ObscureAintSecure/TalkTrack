@@ -3,6 +3,57 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 
+class TestPackageMetadataCheck(unittest.TestCase):
+    """Detects packages that import fine but have gutted dist-info metadata
+    (the interrupted-uv-sync failure mode)."""
+
+    def _checker(self):
+        from app.utils.dependency_checker import DependencyChecker
+        return DependencyChecker()
+
+    def test_all_metadata_present_passes(self):
+        # numpy is installed with intact metadata in the test environment.
+        result = self._checker().check_package_metadata(packages=("numpy",))
+        self.assertTrue(result["passed"])
+
+    def test_importable_without_metadata_reports_damaged(self):
+        # stdlib json imports but has no dist metadata — same signature as a
+        # package whose dist-info was gutted.
+        result = self._checker().check_package_metadata(packages=("json",))
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["level"], "critical")
+        self.assertIn("json", result["message"])
+        self.assertIn("reinstall", result["action"].lower())
+
+    def test_not_installed_reports_missing(self):
+        result = self._checker().check_package_metadata(
+            packages=("definitely-not-a-real-package-xyz",)
+        )
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["level"], "warn")
+
+    def test_metadata_version_none_reports_damaged(self):
+        # importlib.metadata.version can return None (dist-info folder exists
+        # but METADATA file is gone) — must count as damaged, not passed.
+        with patch("importlib.metadata.version", return_value=None):
+            result = self._checker().check_package_metadata(packages=("numpy",))
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["level"], "critical")
+
+    def test_included_in_run_all_checks(self):
+        from app.utils.dependency_checker import DependencyChecker
+        with patch.object(DependencyChecker, "check_package_metadata",
+                          return_value={"name": "Package Metadata",
+                                        "passed": True, "level": "critical",
+                                        "message": "", "action": None}) as m:
+            # Other checks hit real APIs; just verify ours is called.
+            try:
+                DependencyChecker().run_all_checks()
+            except Exception:
+                pass
+            m.assert_called_once()
+
+
 class TestDependencyChecker(unittest.TestCase):
 
     @patch("app.utils.dependency_checker.get_input_devices", return_value=[{"name": "Mic"}])
