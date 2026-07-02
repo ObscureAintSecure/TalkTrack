@@ -48,13 +48,22 @@ class NotesPanel(QWidget):
 
         self._recording_start = None
 
-    def set_session_dir(self, directory):
+    def set_session_dir(self, directory, keep_editor_text=False):
+        """Point the panel at a session directory.
+
+        keep_editor_text=True keeps whatever is typed (used when a recording
+        finishes: notes taken during the call belong to the new session).
+        Otherwise the editor shows the new session's saved notes — or empty,
+        so one recording's notes can't be saved into another.
+        """
         self._session_dir = directory
-        # Load existing notes if any
-        if directory:
-            notes_path = Path(directory) / "notes.txt"
-            if notes_path.exists():
-                self.editor.setPlainText(notes_path.read_text(encoding="utf-8"))
+        if keep_editor_text:
+            return
+        notes_path = Path(directory) / "notes.txt" if directory else None
+        if notes_path is not None and notes_path.exists():
+            self.editor.setPlainText(notes_path.read_text(encoding="utf-8"))
+        else:
+            self.editor.clear()
 
     def set_recording_start(self, start_time):
         self._recording_start = start_time

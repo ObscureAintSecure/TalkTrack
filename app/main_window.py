@@ -711,8 +711,8 @@ class MainWindow(QMainWindow):
         audio_for_transcript = combined or system or mic
         self.transcript_viewer.set_audio_path(audio_for_transcript)
 
-        # Save notes
-        self.notes_panel.set_session_dir(session["directory"])
+        # Save notes typed during the recording into the new session.
+        self.notes_panel.set_session_dir(session["directory"], keep_editor_text=True)
         self.notes_panel.save_notes()
 
         # Refresh recordings list
@@ -1063,7 +1063,9 @@ class MainWindow(QMainWindow):
             speaker_count=self.transcript_viewer.get_speaker_count()
         )
 
-        # Load notes
+        # Persist any edits to the previously loaded recording's notes
+        # before the editor is repointed, then load this recording's notes.
+        self.notes_panel.save_notes()
         self.notes_panel.set_session_dir(metadata["directory"])
 
         # Load saved summary and action items
