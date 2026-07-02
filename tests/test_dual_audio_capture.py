@@ -339,6 +339,23 @@ class TestDualAudioCaptureDispatch(unittest.TestCase):
         self.assertIsNone(cap.system_stream)
 
 
+class TestNoDeadBuffer(unittest.TestCase):
+    """The unconsumed _buffer queue doubled mic memory — must stay gone."""
+
+    def test_audio_stream_has_no_queue_buffer(self):
+        from app.recording.audio_capture import AudioStream
+        stream = AudioStream(device_index=None, sample_rate=16000, channels=1)
+        self.assertFalse(hasattr(stream, "_buffer"))
+
+    def test_callback_stores_single_copy(self):
+        from app.recording.audio_capture import AudioStream
+        stream = AudioStream(device_index=None, sample_rate=16000, channels=1)
+        stream._recording = True
+        stream._paused = False
+        stream._audio_callback(np.ones((64, 1), dtype=np.float32), 64, None, None)
+        self.assertEqual(len(stream._all_chunks), 1)
+
+
 class TestStartFailureCleanup(unittest.TestCase):
     """A mic-start failure must stop the already-started system stream."""
 

@@ -1,7 +1,6 @@
 import logging
 import threading
 import time
-import queue
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
@@ -22,7 +21,6 @@ class AudioStream:
         self.channels = channels
         self._level_callback = level_callback
         self._stream = None
-        self._buffer = queue.Queue()
         self._recording = False
         self._paused = False
         self._all_chunks = []
@@ -39,7 +37,6 @@ class AudioStream:
                 np.clip(chunk, -1.0, 1.0, out=chunk)
             if self._muted:
                 chunk.fill(0.0)
-            self._buffer.put(chunk)
             self._all_chunks.append(chunk)
             if self._level_callback is not None:
                 self._level_callback(chunk)
