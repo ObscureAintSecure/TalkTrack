@@ -45,6 +45,26 @@ class TestProviderFactory(unittest.TestCase):
         provider = create_provider(config)
         self.assertIsNone(provider)
 
+    def test_create_local_provider_uses_local_model_path(self):
+        from app.ai.provider_factory import create_provider
+        config = {
+            "provider": "local",
+            "model": "(set path below)",
+            "local_model_path": "C:/models/test.gguf",
+        }
+        provider = create_provider(config)
+        self.assertEqual(provider._model_path, "C:/models/test.gguf")
+
+    def test_create_local_provider_falls_back_to_model_key(self):
+        from app.ai.provider_factory import create_provider
+        config = {
+            "provider": "local",
+            "model": "C:/models/legacy.gguf",
+            "local_model_path": "",
+        }
+        provider = create_provider(config)
+        self.assertEqual(provider._model_path, "C:/models/legacy.gguf")
+
 
 class TestClaudeProvider(unittest.TestCase):
     def test_complete(self):

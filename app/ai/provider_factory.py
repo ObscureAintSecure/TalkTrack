@@ -47,7 +47,7 @@ def create_provider(config: dict) -> AIProvider | None:
     if provider_type == "local":
         from app.ai.local_provider import LocalProvider
         return LocalProvider(
-            model_path=config.get("model", ""),
+            model_path=config.get("local_model_path") or config.get("model", ""),
             embed_model=config.get("embed_model", "all-MiniLM-L6-v2"),
         )
 
