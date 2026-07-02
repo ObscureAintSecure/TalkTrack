@@ -6,7 +6,7 @@ from app.ai.provider import AIProvider
 class OpenAIProvider(AIProvider):
     def __init__(self, api_key: str, model: str = "gpt-4o"):
         from openai import OpenAI
-        self._client = OpenAI(api_key=api_key)
+        self._client = OpenAI(api_key=api_key, timeout=120.0)
         self._model = model
         self._embed_model = "text-embedding-3-small"
 

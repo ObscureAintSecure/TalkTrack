@@ -6,7 +6,9 @@ from app.ai.provider import AIProvider
 class ClaudeProvider(AIProvider):
     def __init__(self, api_key: str, model: str = "claude-sonnet-4-6"):
         from anthropic import Anthropic
-        self._client = Anthropic(api_key=api_key)
+        # Explicit timeout — the SDK default (~10 min) leaves workers hung
+        # on a dead network with no user-visible failure.
+        self._client = Anthropic(api_key=api_key, timeout=120.0)
         self._model = model
 
     def complete(self, prompt: str, context: str = "") -> str:
