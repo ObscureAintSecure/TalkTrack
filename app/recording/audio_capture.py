@@ -303,6 +303,11 @@ class DualAudioCapture:
         self._pid_lost_callback = None
         self._capture_lost_callback = None
         self._capture_status = None
+        # Wall-clock capture start per stream (time.monotonic). The system
+        # side can start ~1s before the mic (per-app COM activation); tracks
+        # are front-pad aligned at stop so t=0 matches across files.
+        self._mic_start_ts = None
+        self._system_start_ts = None
 
     def set_capture_event_callbacks(self, pid_lost=None, capture_lost=None):
         """Register callbacks for ProcessAudioCapture events (per-app mode only)."""
@@ -365,6 +370,8 @@ class DualAudioCapture:
         # failure raises before the mic stream is opened.
         self.system_stream = None
         self._capture_status = None
+        self._mic_start_ts = None
+        self._system_start_ts = None
 
         def _system_cb(chunk):
             if self._system_level_callback is not None:
@@ -385,6 +392,7 @@ class DualAudioCapture:
                 raise RuntimeError(
                     f"Per-app capture failed for all selected apps: {status['failures']}"
                 )
+            self._system_start_ts = time.monotonic()
         elif self.loopback_device is not None:
             try:
                 dev_info = sd.query_devices(self.loopback_device)
@@ -397,6 +405,7 @@ class DualAudioCapture:
                     level_callback=_system_cb,
                 )
                 self.system_stream.start()
+                self._system_start_ts = time.monotonic()
             except Exception as e:
                 logger.error("Failed to start system audio capture: %s", e)
                 self.system_stream = None
@@ -421,6 +430,7 @@ class DualAudioCapture:
                     level_callback=_mic_cb,
                 )
                 self.mic_stream.start()
+                self._mic_start_ts = time.monotonic()
                 if self._muted:
                     self.mic_stream.set_muted(True)
                 if self.mic_gain != 1.0:
@@ -509,9 +519,26 @@ class DualAudioCapture:
                 except Exception:
                     logger.exception("Failed to stop %s stream", label)
 
-        # Mix mic streams and save
         try:
             mic_data = self._get_mixed_mic_data()
+        except Exception:
+            logger.exception("Failed to read mic audio")
+            mic_data = np.array([], dtype=np.float32)
+
+        sys_data = np.array([], dtype=np.float32)
+        if self.system_stream:
+            try:
+                sys_data = self.system_stream.get_audio_data()
+                if sys_data.ndim > 1:
+                    sys_data = sys_data.mean(axis=1).astype(np.float32)
+            except Exception:
+                logger.exception("Failed to read system audio")
+
+        # Align tracks on wall-clock start so the remote side doesn't lead
+        # the mic by the system-activation delay for the whole recording.
+        mic_data, sys_data = self._apply_start_alignment(mic_data, sys_data)
+
+        try:
             if mic_data.size > 0:
                 mic_path = self.output_dir / "mic_audio.wav"
                 sf.write(str(mic_path), mic_data, self.sample_rate)
@@ -519,16 +546,17 @@ class DualAudioCapture:
         except Exception:
             logger.exception("Failed to save mic audio")
 
-        if self.system_stream:
-            try:
+        try:
+            if sys_data.size > 0:
                 sys_path = self.output_dir / "system_audio.wav"
-                results["system"] = self.system_stream.save_to_file(sys_path)
-            except Exception:
-                logger.exception("Failed to save system audio")
+                sf.write(str(sys_path), sys_data, self.sample_rate)
+                results["system"] = str(sys_path)
+        except Exception:
+            logger.exception("Failed to save system audio")
 
         # Create combined audio for transcription
         try:
-            combined = self._create_combined_audio()
+            combined = self._create_combined_audio(mic_data, sys_data)
             if combined is not None:
                 combined_path = self.output_dir / "combined_audio.wav"
                 sf.write(str(combined_path), combined, self.sample_rate)
@@ -537,6 +565,29 @@ class DualAudioCapture:
             logger.exception("Failed to create combined audio")
 
         return results
+
+    # Offsets beyond this are clock anomalies, not real startup skew.
+    _MAX_ALIGNMENT_SECONDS = 30.0
+
+    def _apply_start_alignment(self, mic_data, sys_data):
+        """Front-pad the later-starting track so t=0 matches wall-clock."""
+        if self._mic_start_ts is None or self._system_start_ts is None:
+            return mic_data, sys_data
+        if mic_data.size == 0 or sys_data.size == 0:
+            return mic_data, sys_data
+        delta = self._mic_start_ts - self._system_start_ts
+        if abs(delta) > self._MAX_ALIGNMENT_SECONDS:
+            logger.warning("Implausible stream start offset %.1fs — skipping alignment", delta)
+            return mic_data, sys_data
+        pad = int(round(abs(delta) * self.sample_rate))
+        if pad <= 0:
+            return mic_data, sys_data
+        zeros = np.zeros(pad, dtype=np.float32)
+        if delta > 0:   # mic started later — it's missing leading audio
+            mic_data = np.concatenate([zeros, mic_data])
+        else:
+            sys_data = np.concatenate([zeros, sys_data])
+        return mic_data, sys_data
 
     def _get_mixed_mic_data(self):
         """Get audio from all mic streams, mixed together."""
@@ -572,29 +623,16 @@ class DualAudioCapture:
             mixed = mixed / peak * 0.95
         return mixed
 
-    def _create_combined_audio(self):
-        """Mix mic and system audio into a single track."""
-        mic_data = self._get_mixed_mic_data()
-        sys_data = self.system_stream.get_audio_data() if self.system_stream else np.array([])
-
+    def _create_combined_audio(self, mic_data, sys_data):
+        """Mix already-aligned mono mic and system tracks into one."""
         if mic_data.size == 0 and sys_data.size == 0:
             return None
 
         if mic_data.size == 0:
-            if sys_data.ndim > 1:
-                return sys_data.mean(axis=1)
             return sys_data
 
         if sys_data.size == 0:
-            if mic_data.ndim > 1:
-                return mic_data.mean(axis=1)
             return mic_data
-
-        # Ensure mono
-        if mic_data.ndim > 1:
-            mic_data = mic_data.mean(axis=1)
-        if sys_data.ndim > 1:
-            sys_data = sys_data.mean(axis=1)
 
         # Pad shorter to match longer
         max_len = max(len(mic_data), len(sys_data))

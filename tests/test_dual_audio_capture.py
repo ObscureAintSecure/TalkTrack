@@ -427,38 +427,102 @@ class TestStopResilience(unittest.TestCase):
         mic.stop.side_effect = RuntimeError("device unplugged")
         mic.get_audio_data.return_value = np.array([], dtype=np.float32)
         system = MagicMock()
-        sys_path = os.path.join(self.output_dir, "system_audio.wav")
-        system.save_to_file.return_value = sys_path
-        system.get_audio_data.return_value = np.zeros(16, dtype=np.float32)
+        system.get_audio_data.return_value = np.full(16, 0.1, dtype=np.float32)
         cap.mic_stream = mic
         cap.system_stream = system
 
         results = cap.stop()
 
         system.stop.assert_called_once()
-        self.assertEqual(results["system"], sys_path)
+        self.assertEqual(
+            results["system"],
+            str(os.path.join(self.output_dir, "system_audio.wav")),
+        )
+        self.assertTrue(os.path.exists(results["system"]))
         self.assertIsNone(results["mic"])
 
     def test_mic_write_failure_still_saves_system(self):
-        import os
         cap = self._make_capture()
         mic = MagicMock()
         mic.get_audio_data.return_value = np.full(16, 0.5, dtype=np.float32)
         system = MagicMock()
-        sys_path = os.path.join(self.output_dir, "system_audio.wav")
-        system.save_to_file.return_value = sys_path
-        system.get_audio_data.return_value = np.zeros(16, dtype=np.float32)
+        system.get_audio_data.return_value = np.full(16, 0.1, dtype=np.float32)
         cap.mic_stream = mic
         cap.system_stream = system
 
-        with patch("app.recording.audio_capture.sf.write",
-                   side_effect=OSError("disk full")):
+        real_write = None
+        import soundfile as _sf
+        real_write = _sf.write
+
+        def _write(path, *args, **kwargs):
+            if "mic_audio" in str(path):
+                raise OSError("disk full")
+            return real_write(path, *args, **kwargs)
+
+        with patch("app.recording.audio_capture.sf.write", side_effect=_write):
             results = cap.stop()
 
         system.stop.assert_called_once()
-        self.assertEqual(results["system"], sys_path)
+        self.assertIsNotNone(results["system"])
         self.assertIsNone(results["mic"])
-        self.assertIsNone(results["combined"])
+        self.assertIsNotNone(results["combined"])
+
+
+class TestStartAlignment(unittest.TestCase):
+    """Front-pad the later-starting track so t=0 matches across tracks."""
+
+    def _make_capture(self):
+        from app.recording.audio_capture import DualAudioCapture
+        return DualAudioCapture(mic_device=None, loopback_device=None,
+                                sample_rate=16000)
+
+    def test_mic_started_later_gets_front_padded(self):
+        cap = self._make_capture()
+        cap._system_start_ts = 100.0
+        cap._mic_start_ts = 101.0   # mic started 1s later
+        mic = np.full(16000, 0.5, dtype=np.float32)
+        system = np.full(32000, 0.1, dtype=np.float32)
+        mic_out, sys_out = cap._apply_start_alignment(mic, system)
+        self.assertEqual(len(mic_out), 32000)   # 16000 pad + 16000 data
+        self.assertTrue(np.all(mic_out[:16000] == 0.0))
+        self.assertTrue(np.all(mic_out[16000:] == 0.5))
+        self.assertIs(sys_out, system)
+
+    def test_system_started_later_gets_front_padded(self):
+        cap = self._make_capture()
+        cap._system_start_ts = 100.5
+        cap._mic_start_ts = 100.0
+        mic = np.full(16000, 0.5, dtype=np.float32)
+        system = np.full(16000, 0.1, dtype=np.float32)
+        mic_out, sys_out = cap._apply_start_alignment(mic, system)
+        self.assertEqual(len(sys_out), 24000)   # 8000 pad + 16000 data
+        self.assertTrue(np.all(sys_out[:8000] == 0.0))
+
+    def test_missing_timestamps_leave_tracks_unchanged(self):
+        cap = self._make_capture()
+        mic = np.full(100, 0.5, dtype=np.float32)
+        system = np.full(100, 0.1, dtype=np.float32)
+        mic_out, sys_out = cap._apply_start_alignment(mic, system)
+        self.assertIs(mic_out, mic)
+        self.assertIs(sys_out, system)
+
+    def test_empty_track_not_padded(self):
+        cap = self._make_capture()
+        cap._system_start_ts = 100.0
+        cap._mic_start_ts = 101.0
+        mic = np.array([], dtype=np.float32)
+        system = np.full(100, 0.1, dtype=np.float32)
+        mic_out, sys_out = cap._apply_start_alignment(mic, system)
+        self.assertEqual(mic_out.size, 0)
+
+    def test_implausible_offset_skipped(self):
+        cap = self._make_capture()
+        cap._system_start_ts = 100.0
+        cap._mic_start_ts = 200.0   # 100s — clock anomaly, don't pad
+        mic = np.full(100, 0.5, dtype=np.float32)
+        system = np.full(100, 0.1, dtype=np.float32)
+        mic_out, _ = cap._apply_start_alignment(mic, system)
+        self.assertEqual(len(mic_out), 100)
 
 
 class TestSystemAudioReceived(unittest.TestCase):
