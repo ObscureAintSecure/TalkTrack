@@ -59,6 +59,73 @@ class _SearchWorker(QThread):
         self.results_ready.emit(results)
 
 
+def salvage_orphaned_recordings(recordings_dir, min_age_seconds=600):
+    """Give crash-orphaned recording dirs minimal metadata.
+
+    The recorder creates the session dir before capture and writes
+    metadata.json only on successful stop, so a crash mid-recording leaves
+    WAVs in a directory the list skips — invisible forever. Synthesize
+    metadata so the audio shows up as a "Recovered" recording instead of
+    deleting user audio. Recent dirs are skipped: they may belong to a
+    recording in progress. Returns the list of salvaged directories.
+    """
+    recordings_dir = Path(recordings_dir)
+    if not recordings_dir.exists():
+        return []
+
+    salvaged = []
+    now = time.time()
+    for entry in recordings_dir.iterdir():
+        if not entry.is_dir() or (entry / "metadata.json").exists():
+            continue
+
+        audio_files = {}
+        for key, fname in (("mic", "mic_audio.wav"),
+                           ("system", "system_audio.wav"),
+                           ("combined", "combined_audio.wav")):
+            path = entry / fname
+            if path.exists():
+                audio_files[key] = str(path)
+        if not audio_files:
+            continue
+
+        try:
+            mtime = entry.stat().st_mtime
+        except OSError:
+            continue
+        if now - mtime < min_age_seconds:
+            continue
+
+        duration = 0.0
+        best_audio = (audio_files.get("combined") or audio_files.get("system")
+                      or audio_files.get("mic"))
+        try:
+            import soundfile as sf
+            duration = float(sf.info(best_audio).duration)
+        except Exception:
+            logger.exception("Could not read duration for %s", best_audio)
+
+        created = datetime.fromtimestamp(mtime)
+        metadata = {
+            "id": entry.name.replace("recording_", ""),
+            "directory": str(entry),
+            "name": f"Recovered {created.strftime('%Y-%m-%d %H:%M')}",
+            "started_at": created.isoformat(),
+            "stopped_at": created.isoformat(),
+            "duration": duration,
+            "audio_files": audio_files,
+            "recovered": True,
+        }
+        try:
+            with open(entry / "metadata.json", "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+            salvaged.append(str(entry))
+            logger.info("Salvaged orphaned recording: %s", entry)
+        except OSError:
+            logger.exception("Failed to salvage %s", entry)
+    return salvaged
+
+
 def _rmtree_robust(directory, retries=4, initial_delay=0.1):
     """shutil.rmtree with Windows-friendly retry + read-only handling.
 
@@ -108,6 +175,10 @@ class RecordingsList(QWidget):
         self._recordings = []
         self._search_worker = None
         self._pending_search = None
+        try:
+            salvage_orphaned_recordings(self.recordings_dir)
+        except Exception:
+            logger.exception("Orphan salvage failed")
         self._setup_ui()
         self.refresh()
 
@@ -152,6 +223,9 @@ class RecordingsList(QWidget):
                 with open(meta_path) as f:
                     metadata = json.load(f)
             except (json.JSONDecodeError, OSError):
+                continue
+
+            if not metadata.get("directory"):
                 continue
 
             self._recordings.append(metadata)
