@@ -168,7 +168,7 @@ class Recorder(QObject):
 
             # Save session metadata
             meta_path = Path(self._current_session["directory"]) / "metadata.json"
-            with open(meta_path, "w") as f:
+            with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(self._current_session, f, indent=2)
 
             self._set_state(RecordingState.IDLE)

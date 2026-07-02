@@ -69,7 +69,9 @@ def install_package(pip_package: str) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             cmd,
-            capture_output=True, text=True, timeout=120,
+            # llama-cpp-python can compile from source on Windows; give
+            # installs enough headroom instead of failing at 2 minutes.
+            capture_output=True, text=True, timeout=900,
         )
         if result.returncode == 0:
             return True, result.stdout
