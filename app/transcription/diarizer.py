@@ -1,7 +1,24 @@
+import threading
 from dataclasses import dataclass
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
+
+# Loaded pyannote pipelines keyed by HF token. from_pretrained costs many
+# seconds; the pipeline stays resident between recordings by design.
+_PIPELINE_CACHE = {}
+_PIPELINE_CACHE_LOCK = threading.Lock()
+
+
+def _get_pipeline(hf_token):
+    with _PIPELINE_CACHE_LOCK:
+        if hf_token not in _PIPELINE_CACHE:
+            from pyannote.audio import Pipeline
+            _PIPELINE_CACHE[hf_token] = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-community-1",
+                token=hf_token,
+            )
+        return _PIPELINE_CACHE[hf_token]
 
 
 @dataclass
@@ -31,8 +48,6 @@ class DiarizationWorker(QThread):
         try:
             self.progress.emit("Loading speaker diarization model...")
 
-            from pyannote.audio import Pipeline
-
             if not self.hf_token:
                 self.error.emit(
                     "HuggingFace token required for pyannote.audio. "
@@ -42,10 +57,7 @@ class DiarizationWorker(QThread):
                 )
                 return
 
-            pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-community-1",
-                token=self.hf_token,
-            )
+            pipeline = _get_pipeline(self.hf_token)
 
             self.progress.emit("Loading audio for diarization...")
 
@@ -160,24 +172,25 @@ class SimpleDiarizer:
         if mic_data is None and sys_data is None:
             return transcript
 
-        sample_rate = mic_sr if mic_data is not None else sys_sr
+        def _window_rms(data, rate, start_s, end_s):
+            # Each track is indexed with its OWN sample rate — mic and system
+            # can legitimately be recorded at different rates.
+            start = int(start_s * rate)
+            end = min(int(end_s * rate), len(data))
+            if start >= len(data):
+                return 0.0
+            chunk = data[start:end]
+            return float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 0 else 0.0
 
         for seg in transcript.segments:
-            start_sample = int(seg.start * sample_rate)
-            end_sample = int(seg.end * sample_rate)
-
             mic_energy = 0.0
             sys_energy = 0.0
 
-            if mic_data is not None and start_sample < len(mic_data):
-                end_s = min(end_sample, len(mic_data))
-                chunk = mic_data[start_sample:end_s]
-                mic_energy = float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 0 else 0.0
+            if mic_data is not None:
+                mic_energy = _window_rms(mic_data, mic_sr, seg.start, seg.end)
 
-            if sys_data is not None and start_sample < len(sys_data):
-                end_s = min(end_sample, len(sys_data))
-                chunk = sys_data[start_sample:end_s]
-                sys_energy = float(np.sqrt(np.mean(chunk ** 2))) if len(chunk) > 0 else 0.0
+            if sys_data is not None:
+                sys_energy = _window_rms(sys_data, sys_sr, seg.start, seg.end)
 
             if mic_energy > sys_energy * 1.5:
                 seg.speaker = "You"
@@ -187,3 +200,28 @@ class SimpleDiarizer:
                 seg.speaker = "You" if mic_energy >= sys_energy else "Remote"
 
         return transcript
+
+
+class SimpleDiarizeWorker(QThread):
+    """Runs SimpleDiarizer off the GUI thread.
+
+    Reading both full WAVs plus per-segment RMS freezes the UI for seconds
+    on long recordings when run inline.
+    """
+
+    finished = pyqtSignal(TranscriptResult)
+    error = pyqtSignal(str)
+
+    def __init__(self, mic_audio_path, system_audio_path, transcript_result):
+        super().__init__()
+        self.mic_audio_path = mic_audio_path
+        self.system_audio_path = system_audio_path
+        self.transcript_result = transcript_result
+
+    def run(self):
+        try:
+            diarizer = SimpleDiarizer(self.mic_audio_path, self.system_audio_path)
+            result = diarizer.diarize(self.transcript_result)
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(f"Simple diarization failed: {e}")

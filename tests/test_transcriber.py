@@ -1,6 +1,70 @@
 """Tests for TranscriptSegment and TranscriptResult."""
+import math
+import sys
 import unittest
+from unittest.mock import MagicMock, patch
+
 from app.transcription.transcriber import TranscriptSegment, TranscriptResult
+
+
+class _FwMocks:
+    """Build a mocked faster_whisper module returning given segments."""
+
+    def __init__(self, segments=(), duration=5.0):
+        self.module = MagicMock()
+        self.model = MagicMock()
+        self.module.WhisperModel.return_value = self.model
+        info = MagicMock(language="en", duration=duration)
+        self.model.transcribe.return_value = (iter(list(segments)), info)
+
+
+class TestWhisperModelCache(unittest.TestCase):
+    def test_same_params_reuse_model(self):
+        fw = _FwMocks()
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            m1 = tr._get_model("base", "cpu", "int8")
+            m2 = tr._get_model("base", "cpu", "int8")
+        self.assertIs(m1, m2)
+        self.assertEqual(fw.module.WhisperModel.call_count, 1)
+
+    def test_different_params_create_new_model(self):
+        fw = _FwMocks()
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            tr._get_model("base", "cpu", "int8")
+            tr._get_model("small", "cpu", "int8")
+        self.assertEqual(fw.module.WhisperModel.call_count, 2)
+
+
+class TestRunSegmentMapping(unittest.TestCase):
+    def _run_worker(self, segments):
+        fw = _FwMocks(segments=segments)
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            worker = tr.TranscriptionWorker(
+                "a.wav", model_size="base", device="cpu"
+            )
+            results = []
+            worker.finished.connect(results.append)
+            worker.run()
+        return results, fw.model
+
+    def test_confidence_populated_from_avg_logprob(self):
+        seg = MagicMock(start=0.0, end=1.0, text=" hi ", avg_logprob=-0.5)
+        results, _ = self._run_worker([seg])
+        self.assertEqual(len(results), 1)
+        self.assertAlmostEqual(
+            results[0].segments[0].confidence, math.exp(-0.5), places=5
+        )
+
+    def test_word_timestamps_not_requested(self):
+        _, model = self._run_worker([])
+        kwargs = model.transcribe.call_args.kwargs
+        self.assertNotIn("word_timestamps", kwargs)
 
 
 class TestTranscriptSegment(unittest.TestCase):

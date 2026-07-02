@@ -1,7 +1,26 @@
+import math
 import os
+import threading
 from pathlib import Path
 from dataclasses import dataclass, field, fields
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
+
+# Loaded Whisper models keyed by (model_size, device, compute_type).
+# Loading costs seconds-to-tens-of-seconds per recording; models stay
+# resident between transcriptions by design.
+_MODEL_CACHE = {}
+_MODEL_CACHE_LOCK = threading.Lock()
+
+
+def _get_model(model_size, device, compute_type):
+    key = (model_size, device, compute_type)
+    with _MODEL_CACHE_LOCK:
+        if key not in _MODEL_CACHE:
+            from faster_whisper import WhisperModel
+            _MODEL_CACHE[key] = WhisperModel(
+                model_size, device=device, compute_type=compute_type,
+            )
+        return _MODEL_CACHE[key]
 
 
 @dataclass
@@ -138,7 +157,6 @@ class TranscriptionWorker(QThread):
     def run(self):
         try:
             self.progress.emit("Loading transcription model...")
-            from faster_whisper import WhisperModel
 
             device = self.device
             if device == "cuda":
@@ -156,11 +174,7 @@ class TranscriptionWorker(QThread):
                     device = "cpu"
 
             compute_type = "float16" if device == "cuda" else "int8"
-            model = WhisperModel(
-                self.model_size,
-                device=device,
-                compute_type=compute_type,
-            )
+            model = _get_model(self.model_size, device, compute_type)
 
             if self._cancel_requested:
                 self.cancelled.emit()
@@ -170,7 +184,6 @@ class TranscriptionWorker(QThread):
             segments_gen, info = model.transcribe(
                 self.audio_path,
                 language=self.language,
-                word_timestamps=True,
                 vad_filter=True,
             )
 
@@ -187,6 +200,7 @@ class TranscriptionWorker(QThread):
                     start=segment.start,
                     end=segment.end,
                     text=segment.text.strip(),
+                    confidence=math.exp(segment.avg_logprob),
                 )
                 result.segments.append(ts)
                 self.progress.emit(f"Transcribed: {_format_time(segment.end)}")
