@@ -6,7 +6,11 @@ from app.ai.provider import AIProvider
 class MistralProvider(AIProvider):
     def __init__(self, api_key: str, model: str = "mistral-large-latest"):
         from mistralai import Mistral
-        self._client = Mistral(api_key=api_key)
+        import httpx
+        # The SDK has no timeout kwarg; the documented path is a custom
+        # httpx client. Without it a dead network hangs the worker.
+        self._client = Mistral(api_key=api_key,
+                               client=httpx.Client(timeout=120.0))
         self._model = model
 
     def complete(self, prompt: str, context: str = "") -> str:

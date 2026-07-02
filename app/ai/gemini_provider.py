@@ -11,7 +11,10 @@ class GeminiProvider(AIProvider):
 
     def complete(self, prompt: str, context: str = "") -> str:
         full_prompt = f"{context}\n\n{prompt}" if context else prompt
-        response = self._model.generate_content(full_prompt)
+        response = self._model.generate_content(
+            full_prompt,
+            request_options={"timeout": 120.0},
+        )
         return response.text
 
     def embed(self, texts: list[str]) -> list[list[float]]:
