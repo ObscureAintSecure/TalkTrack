@@ -51,6 +51,8 @@ class MainWindow(QMainWindow):
         self._transcription_worker = None
         self._diarization_worker = None
         self._summarize_worker = None
+        self._pending_transcriptions = []
+        self._closing = False
         self._mic_muted = False
         self._pending_gain = None  # holds latest slider value awaiting debounced save
         self._gain_save_timer = QTimer(self)
@@ -705,8 +707,25 @@ class MainWindow(QMainWindow):
                 "skipping auto-transcription. Use Transcribe button to transcribe manually."
             )
 
-    def _start_transcription(self, audio_path):
-        if self._transcription_worker and self._transcription_worker.isRunning():
+    def _transcription_busy(self):
+        return (
+            (self._transcription_worker is not None and self._transcription_worker.isRunning())
+            or (self._diarization_worker is not None and self._diarization_worker.isRunning())
+        )
+
+    def _start_transcription(self, audio_path, session=None):
+        if self._closing:
+            return
+        # Bind the session at start time — completion handlers must not read
+        # self._current_session, which the user may have switched meanwhile.
+        if session is None:
+            session = self._current_session
+        if self._transcription_busy():
+            if not any(p[0] == audio_path for p in self._pending_transcriptions):
+                self._pending_transcriptions.append((audio_path, session))
+                self.status_label.setText(
+                    "Transcription queued — another recording is still processing."
+                )
             return
 
         model_size = self.config.get("transcription", "model_size")
@@ -719,6 +738,7 @@ class MainWindow(QMainWindow):
             language=language,
             device=device,
         )
+        self._transcription_worker.session = session
         self._transcription_worker.progress.connect(self._on_transcription_progress)
         self._transcription_worker.finished.connect(self._on_transcription_finished)
         self._transcription_worker.error.connect(self._on_transcription_error)
@@ -736,21 +756,31 @@ class MainWindow(QMainWindow):
     def _on_transcription_cancelled(self):
         self.transcript_viewer.hide_progress()
         self.status_label.setText("Transcription cancelled.")
+        self._process_pending_transcriptions()
+
+    def _process_pending_transcriptions(self):
+        if self._closing or self._transcription_busy():
+            return
+        if not self._pending_transcriptions:
+            return
+        audio_path, session = self._pending_transcriptions.pop(0)
+        self._start_transcription(audio_path, session)
 
     def _on_transcription_progress(self, message):
         self.transcript_viewer.show_progress(message)
         self.status_label.setText(message)
 
     def _on_transcription_finished(self, result):
+        session = getattr(self._transcription_worker, "session", None)
         diarization_enabled = self.config.get("diarization", "enabled")
         hf_token = self.config.get("diarization", "hf_token")
 
         if diarization_enabled and hf_token:
             # Run full diarization with pyannote
-            self._start_diarization(result)
-        elif self._current_session:
+            self._start_diarization(result, session)
+        elif session:
             # Try simple channel-based diarization
-            audio_files = self._current_session.get("audio_files", {})
+            audio_files = session.get("audio_files", {})
             mic_path = audio_files.get("mic")
             sys_path = audio_files.get("system")
 
@@ -761,19 +791,21 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     print(f"Simple diarization failed: {e}")
 
-            self._display_final_transcript(result)
+            self._display_final_transcript(result, session)
         else:
-            self._display_final_transcript(result)
+            self._display_final_transcript(result, session)
 
-    def _start_diarization(self, transcript_result):
+    def _start_diarization(self, transcript_result, session):
         if self._diarization_worker and self._diarization_worker.isRunning():
+            # Shouldn't happen with the serial queue — display rather than drop.
+            self._display_final_transcript(transcript_result, session)
             return
 
-        audio_files = self._current_session.get("audio_files", {}) if self._current_session else {}
+        audio_files = session.get("audio_files", {}) if session else {}
         audio_path = audio_files.get("combined") or audio_files.get("system") or audio_files.get("mic")
 
         if not audio_path:
-            self._display_final_transcript(transcript_result)
+            self._display_final_transcript(transcript_result, session)
             return
 
         hf_token = self.config.get("diarization", "hf_token")
@@ -787,17 +819,25 @@ class MainWindow(QMainWindow):
             min_speakers=min_speakers,
             max_speakers=max_speakers,
         )
+        self._diarization_worker.session = session
         self._diarization_worker.progress.connect(self._on_transcription_progress)
-        self._diarization_worker.finished.connect(self._display_final_transcript)
+        self._diarization_worker.finished.connect(self._on_diarization_finished)
         self._diarization_worker.error.connect(self._on_diarization_error)
         self._diarization_worker.start()
 
         self.transcript_viewer.show_progress("Running speaker diarization...")
 
+    def _on_diarization_finished(self, result):
+        session = getattr(self._diarization_worker, "session", None)
+        self._display_final_transcript(result, session)
+
     def _on_diarization_error(self, error_msg):
         # Transcription itself succeeded — render it without speaker labels.
         if self._diarization_worker is not None:
-            self._display_final_transcript(self._diarization_worker.transcript_result)
+            self._display_final_transcript(
+                self._diarization_worker.transcript_result,
+                getattr(self._diarization_worker, "session", None),
+            )
         else:
             self.transcript_viewer.hide_progress()
         self.status_label.setText("Diarization failed - showing transcript without speakers")
@@ -806,7 +846,50 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Diarization Error", error_msg)
 
-    def _display_final_transcript(self, result):
+    def _is_current_session(self, session):
+        if session is None or session is self._current_session:
+            return True
+        if not self._current_session:
+            return False
+        return session.get("directory") == self._current_session.get("directory")
+
+    def _write_transcript_for_session(self, result, session):
+        """Persist a transcript for a session that is no longer displayed."""
+        if not session or not session.get("directory"):
+            return
+        directory = Path(session["directory"])
+        names = {}
+        names_path = directory / "speaker_names.json"
+        if names_path.exists():
+            try:
+                with open(names_path, "r", encoding="utf-8") as f:
+                    names = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        try:
+            with open(directory / "transcript.json", "w", encoding="utf-8") as f:
+                json.dump(result.to_dict(speaker_names=names), f, indent=2, ensure_ascii=False)
+            with open(directory / "transcript.txt", "w", encoding="utf-8") as f:
+                f.write(result.to_text(speaker_names=names))
+        except OSError:
+            self.status_label.setText("Failed to save transcript.")
+
+    def _display_final_transcript(self, result, session=None):
+        if session is None:
+            session = self._current_session
+
+        if not self._is_current_session(session):
+            # Finished after the user switched recordings: save to the
+            # recording's own directory, leave the displayed UI alone.
+            self._write_transcript_for_session(result, session)
+            name = session.get("name") or Path(session.get("directory", "")).name
+            self.status_label.setText(f"Transcription of '{name}' complete.")
+            self.recordings_list.refresh()
+            if self._is_hidden_to_tray():
+                self._flag_success_notification()
+            self._process_pending_transcriptions()
+            return
+
         self.transcript_viewer.hide_progress()
 
         # Load speaker names if available
@@ -844,6 +927,8 @@ class MainWindow(QMainWindow):
         # Update chat panel context
         self._update_chat_context()
 
+        self._process_pending_transcriptions()
+
     def _on_transcription_error(self, error_msg):
         self.transcript_viewer.hide_progress()
         self.status_label.setText("Transcription failed.")
@@ -851,6 +936,7 @@ class MainWindow(QMainWindow):
             self._flag_error_notification()
         else:
             QMessageBox.warning(self, "Transcription Error", error_msg)
+        self._process_pending_transcriptions()
 
     def _on_recording_about_to_delete(self, directory):
         """Release any file handles on the session about to be deleted.
