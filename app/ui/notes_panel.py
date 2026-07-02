@@ -78,8 +78,12 @@ class NotesPanel(QWidget):
     def save_notes(self):
         if not self._session_dir:
             return
+        from app.utils.atomic_io import atomic_write_text
         notes_path = Path(self._session_dir) / "notes.txt"
-        notes_path.write_text(self.editor.toPlainText(), encoding="utf-8")
+        try:
+            atomic_write_text(notes_path, self.editor.toPlainText())
+        except OSError:
+            pass  # session dir may have been deleted; nothing to save into
 
     def clear(self):
         self.editor.clear()

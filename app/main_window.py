@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QEvent
 from PyQt6.QtGui import QAction
 
+from app.utils.atomic_io import atomic_write_json, atomic_write_text
 from app.utils.config import Config
 from app.recording.audio_capture import LoopbackStream
 from app.recording.process_audio_capture import ProcessAudioCapture
@@ -923,10 +924,11 @@ class MainWindow(QMainWindow):
             except (json.JSONDecodeError, OSError):
                 pass
         try:
-            with open(directory / "transcript.json", "w", encoding="utf-8") as f:
-                json.dump(result.to_dict(speaker_names=names), f, indent=2, ensure_ascii=False)
-            with open(directory / "transcript.txt", "w", encoding="utf-8") as f:
-                f.write(result.to_text(speaker_names=names))
+            atomic_write_json(directory / "transcript.json",
+                              result.to_dict(speaker_names=names),
+                              indent=2, ensure_ascii=False)
+            atomic_write_text(directory / "transcript.txt",
+                              result.to_text(speaker_names=names))
         except OSError:
             self.status_label.setText("Failed to save transcript.")
 
@@ -1127,13 +1129,16 @@ class MainWindow(QMainWindow):
         result = self.transcript_viewer._transcript
         names = self.transcript_viewer._speaker_names
 
-        transcript_path = Path(self._current_session["directory"]) / "transcript.json"
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            json.dump(result.to_dict(speaker_names=names), f, indent=2, ensure_ascii=False)
-
-        txt_path = Path(self._current_session["directory"]) / "transcript.txt"
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(result.to_text(speaker_names=names))
+        try:
+            transcript_path = Path(self._current_session["directory"]) / "transcript.json"
+            atomic_write_json(transcript_path,
+                              result.to_dict(speaker_names=names),
+                              indent=2, ensure_ascii=False)
+            txt_path = Path(self._current_session["directory"]) / "transcript.txt"
+            atomic_write_text(txt_path, result.to_text(speaker_names=names))
+        except OSError as e:
+            self.status_label.setText(f"Failed to save transcript: {e}")
+            return
 
         self.recordings_list.refresh()
 
@@ -1142,8 +1147,10 @@ class MainWindow(QMainWindow):
         if not self._current_session:
             return
         names_path = Path(self._current_session["directory"]) / "speaker_names.json"
-        with open(names_path, "w", encoding="utf-8") as f:
-            json.dump(names, f, indent=2, ensure_ascii=False)
+        try:
+            atomic_write_json(names_path, names, indent=2, ensure_ascii=False)
+        except OSError as e:
+            self.status_label.setText(f"Failed to save speaker names: {e}")
 
         # Also re-save transcript with updated names
         self._save_transcript()
@@ -1161,8 +1168,7 @@ class MainWindow(QMainWindow):
                 with open(meta_path, "r", encoding="utf-8") as f:
                     metadata = json.load(f)
                 metadata["name"] = new_name
-                with open(meta_path, "w", encoding="utf-8") as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                atomic_write_json(meta_path, metadata, indent=2, ensure_ascii=False)
             except (json.JSONDecodeError, OSError) as e:
                 print(f"Failed to save recording name: {e}")
 
@@ -1469,8 +1475,10 @@ class MainWindow(QMainWindow):
         self.summary_panel.set_summary(summary)
         if self._current_session:
             path = Path(self._current_session["directory"]) / "summary.md"
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(summary)
+            try:
+                atomic_write_text(path, summary)
+            except OSError:
+                self.status_label.setText("Failed to save summary.")
 
     def _on_actions_ready(self, items):
         self.action_items_panel.set_items(items)
@@ -1480,8 +1488,7 @@ class MainWindow(QMainWindow):
         if self._current_session:
             path = Path(self._current_session["directory"]) / "action_items.json"
             try:
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(items, f, indent=2)
+                atomic_write_json(path, items, indent=2)
             except OSError:
                 self.status_label.setText("Failed to save action items.")
 

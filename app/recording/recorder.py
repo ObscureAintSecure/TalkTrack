@@ -167,9 +167,9 @@ class Recorder(QObject):
                 self._convert_to_mp3(audio_files)
 
             # Save session metadata
+            from app.utils.atomic_io import atomic_write_json
             meta_path = Path(self._current_session["directory"]) / "metadata.json"
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(self._current_session, f, indent=2)
+            atomic_write_json(meta_path, self._current_session, indent=2)
 
             self._set_state(RecordingState.IDLE)
             self.recording_finished.emit(self._current_session)
