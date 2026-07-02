@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 from pathlib import Path
@@ -71,18 +72,37 @@ class Config:
         self.load()
 
     def load(self):
+        self._data = None
         if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, "r") as f:
-                saved = json.load(f)
-            self._data = self._deep_merge(DEFAULT_CONFIG, saved)
-        else:
-            self._data = json.loads(json.dumps(DEFAULT_CONFIG))
-        os.makedirs(self._data["output"]["directory"], exist_ok=True)
+            try:
+                with open(CONFIG_FILE, "r") as f:
+                    saved = json.load(f)
+                if not isinstance(saved, dict):
+                    raise ValueError("settings root is not an object")
+                self._data = self._deep_merge(DEFAULT_CONFIG, saved)
+            except (json.JSONDecodeError, ValueError, OSError):
+                self._backup_corrupt_file()
+        if self._data is None:
+            self._data = copy.deepcopy(DEFAULT_CONFIG)
+        try:
+            os.makedirs(self._data["output"]["directory"], exist_ok=True)
+        except OSError:
+            self._data["output"]["directory"] = DEFAULT_CONFIG["output"]["directory"]
+            os.makedirs(self._data["output"]["directory"], exist_ok=True)
 
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(CONFIG_FILE, "w") as f:
+        tmp_path = CONFIG_FILE.parent / (CONFIG_FILE.name + ".tmp")
+        with open(tmp_path, "w") as f:
             json.dump(self._data, f, indent=2)
+        os.replace(tmp_path, CONFIG_FILE)
+
+    def _backup_corrupt_file(self):
+        try:
+            backup = CONFIG_FILE.parent / (CONFIG_FILE.name + ".bak")
+            os.replace(CONFIG_FILE, backup)
+        except OSError:
+            pass
 
     def get(self, *keys):
         value = self._data
@@ -104,7 +124,9 @@ class Config:
         return self._data
 
     def _deep_merge(self, base, override):
-        result = base.copy()
+        # Deep-copy so missing sections don't alias (and later mutate)
+        # the module-global DEFAULT_CONFIG through Config.set().
+        result = copy.deepcopy(base)
         for key, value in override.items():
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = self._deep_merge(result[key], value)
