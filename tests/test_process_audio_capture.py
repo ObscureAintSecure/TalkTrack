@@ -253,19 +253,44 @@ class TestProcessAudioCaptureMixer(unittest.TestCase):
         self.assertFalse(bad.is_active)
         self.assertGreater(len(received), 0)
 
-    def test_buffer_disabled_skips_all_chunks_append(self):
+    def test_sink_receives_mixed_chunks(self):
         from app.recording.process_audio_capture import ProcessAudioCapture
+
+        class FakeSink:
+            def __init__(self):
+                self.chunks = []
+
+            def put(self, chunk):
+                self.chunks.append(chunk)
+
+        sink = FakeSink()
         a = FakeStream(pid=1, queued_chunks=[np.ones(160, dtype=np.float32)])
-        cap = ProcessAudioCapture(pids=[1], sample_rate=16000,
-                                  level_callback=None, enable_buffer=False)
+        cap = ProcessAudioCapture(pids=[1], sample_rate=16000, sink=sink)
         cap._streams = {1: a}
         cap._running = True
         t = threading.Thread(target=cap._mixer_loop, daemon=True)
         t.start()
-        self._wait_for(lambda: len(a._queue) == 0)
+        self._wait_for(lambda: len(sink.chunks) > 0)
         cap._running = False
         t.join(timeout=1)
-        self.assertEqual(len(cap._all_chunks), 0)
+        self.assertEqual(len(sink.chunks[0]), 160)
+
+    def test_no_sink_still_feeds_level_callback(self):
+        # Level-only usage (the old enable_buffer=False) — no accumulation.
+        from app.recording.process_audio_capture import ProcessAudioCapture
+        received = []
+        a = FakeStream(pid=1, queued_chunks=[np.ones(160, dtype=np.float32)])
+        cap = ProcessAudioCapture(pids=[1], sample_rate=16000,
+                                  level_callback=received.append)
+        cap._streams = {1: a}
+        cap._running = True
+        t = threading.Thread(target=cap._mixer_loop, daemon=True)
+        t.start()
+        self._wait_for(lambda: len(received) > 0)
+        cap._running = False
+        t.join(timeout=1)
+        self.assertGreater(len(received), 0)
+        self.assertFalse(hasattr(cap, "_all_chunks"))
 
 
 class TestProcessAudioCaptureSignals(unittest.TestCase):
@@ -379,28 +404,8 @@ class TestProcessAudioCaptureStart(unittest.TestCase):
         cap.start(skip_stream_creation=True)
         result = cap.stop()
         self.assertTrue(fs.released)
-        self.assertIn("mixed_audio", result)
+        self.assertIn("active_pids", result)
         self.assertFalse(cap._running)
-
-    def test_save_to_file_writes_when_buffer_enabled(self):
-        import tempfile, os
-        from app.recording.process_audio_capture import ProcessAudioCapture
-        cap = ProcessAudioCapture(pids=[1], sample_rate=16000)
-        cap._all_chunks = [np.ones(16000, dtype=np.float32)]
-        with tempfile.TemporaryDirectory() as td:
-            path = os.path.join(td, "out.wav")
-            result = cap.save_to_file(path)
-            self.assertTrue(os.path.exists(path))
-            self.assertEqual(result, path)
-
-    def test_save_to_file_returns_none_when_no_data(self):
-        import tempfile, os
-        from app.recording.process_audio_capture import ProcessAudioCapture
-        cap = ProcessAudioCapture(pids=[1], sample_rate=16000)
-        with tempfile.TemporaryDirectory() as td:
-            path = os.path.join(td, "out.wav")
-            self.assertIsNone(cap.save_to_file(path))
-            self.assertFalse(os.path.exists(path))
 
 
 class TestProcessCaptureStreamActivate(unittest.TestCase):

@@ -83,6 +83,27 @@ class ChunkWriter:
                 logger.exception("Could not remove empty track %s", self.path)
         return self._frames_written
 
+    def abort(self):
+        """Stop and delete the file regardless of frames written.
+
+        Used when DualAudioCapture.start() fails partway — a discarded
+        session must leave no track files (same contract as the old
+        in-RAM design, which never saved anything before stop()).
+        """
+        self._stopping = True
+        self._discard = True
+        if not self._released.is_set():
+            self._released.set()
+        self._thread.join(timeout=10.0)
+        try:
+            self._file.close()
+        except Exception:
+            logger.exception("Error closing %s during abort", self.path)
+        try:
+            self.path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not remove aborted track %s", self.path)
+
     def _run(self):
         self._released.wait()
         if self._discard:

@@ -1,4 +1,5 @@
 import logging
+import shutil
 import threading
 import time
 import numpy as np
@@ -6,6 +7,7 @@ import sounddevice as sd
 import soundfile as sf
 from pathlib import Path
 
+from app.recording.chunk_writer import ChunkWriter
 from app.recording.process_audio_capture import ProcessAudioCapture, _Resampler
 
 logger = logging.getLogger(__name__)
@@ -15,15 +17,15 @@ class AudioStream:
     """Captures audio from a single input device (mic) using sounddevice."""
 
     def __init__(self, device_index, sample_rate=16000, channels=1,
-                 level_callback=None):
+                 level_callback=None, sink=None):
         self.device_index = device_index
         self.sample_rate = sample_rate
         self.channels = channels
         self._level_callback = level_callback
+        self._sink = sink
         self._stream = None
         self._recording = False
         self._paused = False
-        self._all_chunks = []
         self._muted = False
         self._gain = 1.0
 
@@ -37,14 +39,14 @@ class AudioStream:
                 np.clip(chunk, -1.0, 1.0, out=chunk)
             if self._muted:
                 chunk.fill(0.0)
-            self._all_chunks.append(chunk)
+            if self._sink is not None:
+                self._sink.put(chunk)
             if self._level_callback is not None:
                 self._level_callback(chunk)
 
     def start(self):
         self._recording = True
         self._paused = False
-        self._all_chunks = []
 
         try:
             self._stream = sd.InputStream(
@@ -85,20 +87,6 @@ class AudioStream:
             finally:
                 self._stream = None
 
-    def get_audio_data(self):
-        """Return all recorded audio as a numpy array."""
-        if not self._all_chunks:
-            return np.array([], dtype=np.float32)
-        return np.concatenate(self._all_chunks, axis=0)
-
-    def save_to_file(self, filepath):
-        """Save recorded audio to a WAV file."""
-        data = self.get_audio_data()
-        if data.size == 0:
-            return None
-        sf.write(str(filepath), data, self.sample_rate)
-        return str(filepath)
-
     @property
     def is_active(self):
         return self._recording and self._stream is not None
@@ -107,15 +95,16 @@ class AudioStream:
 class LoopbackStream:
     """Captures system audio via WASAPI loopback using PyAudioWPatch."""
 
-    def __init__(self, device_name=None, sample_rate=16000, level_callback=None):
+    def __init__(self, device_name=None, sample_rate=16000, level_callback=None,
+                 sink=None):
         self._device_name = device_name
         self._target_rate = sample_rate
         self._level_callback = level_callback
+        self._sink = sink
         self._stream = None
         self._pa = None
         self._recording = False
         self._paused = False
-        self._all_chunks = []
         self._native_rate = None
         self._native_channels = None
         # Polyphase resampler built on start() once native_rate is known.
@@ -167,7 +156,6 @@ class LoopbackStream:
 
         self._recording = True
         self._paused = False
-        self._all_chunks = []
 
         try:
             loopback_dev = self._find_loopback_device()
@@ -222,7 +210,8 @@ class LoopbackStream:
             if mono.size == 0:
                 return (None, pyaudio.paContinue)
 
-            self._all_chunks.append(mono)
+            if self._sink is not None:
+                self._sink.put(mono)
             if self._level_callback is not None:
                 self._level_callback(mono)
 
@@ -252,21 +241,66 @@ class LoopbackStream:
             finally:
                 self._pa = None
 
-    def get_audio_data(self):
-        if not self._all_chunks:
-            return np.array([], dtype=np.float32)
-        return np.concatenate(self._all_chunks, axis=0)
-
-    def save_to_file(self, filepath):
-        data = self.get_audio_data()
-        if data.size == 0:
-            return None
-        sf.write(str(filepath), data, self._target_rate)
-        return str(filepath)
-
     @property
     def is_active(self):
         return self._recording and self._stream is not None
+
+
+def mix_wav_files(src_paths, out_path, weights, sample_rate,
+                  normalize="always", block_frames=262144, target_peak=0.95):
+    """Mix WAV files block-wise into out_path without loading them whole.
+
+    Shorter sources are zero-padded to the longest. Two passes: the first
+    finds the mix peak, the second writes the scaled mix — same result as
+    the old whole-array math, bounded memory.
+
+    normalize: "always" scales the peak to target_peak (when peak > 0),
+    "if_clipping" scales only when the raw mix exceeds 1.0 (dual-mic
+    convention), "never" writes the raw mix.
+    """
+    handles = [sf.SoundFile(str(p), mode="r") for p in src_paths]
+    try:
+        total = max(len(h) for h in handles)
+        if total == 0:
+            return None
+
+        def mixed_blocks():
+            for h in handles:
+                h.seek(0)
+            pos = 0
+            while pos < total:
+                n = min(block_frames, total - pos)
+                mix = np.zeros(n, dtype=np.float32)
+                for h, w in zip(handles, weights):
+                    data = h.read(frames=n, dtype="float32", always_2d=False)
+                    if data.ndim > 1:
+                        data = data.mean(axis=1).astype(np.float32)
+                    if len(data) < n:
+                        data = np.pad(data, (0, n - len(data)))
+                    mix += w * data
+                pos += n
+                yield mix
+
+        peak = 0.0
+        for mix in mixed_blocks():
+            peak = max(peak, float(np.abs(mix).max()))
+        scale = 1.0
+        if normalize == "always" and peak > 0:
+            scale = target_peak / peak
+        elif normalize == "if_clipping" and peak > 1.0:
+            scale = target_peak / peak
+
+        with sf.SoundFile(str(out_path), mode="w", samplerate=sample_rate,
+                          channels=1, subtype="PCM_16") as out:
+            for mix in mixed_blocks():
+                out.write(mix * scale if scale != 1.0 else mix)
+    finally:
+        for h in handles:
+            try:
+                h.close()
+            except Exception:
+                logger.exception("Error closing mix source")
+    return str(out_path)
 
 
 class DualAudioCapture:
@@ -304,10 +338,14 @@ class DualAudioCapture:
         self._capture_lost_callback = None
         self._capture_status = None
         # Wall-clock capture start per stream (time.monotonic). The system
-        # side can start ~1s before the mic (per-app COM activation); tracks
-        # are front-pad aligned at stop so t=0 matches across files.
+        # side can start ~1s before the mic (per-app COM activation); the
+        # mic writers get a leading-silence prepad at release so t=0 matches
+        # wall-clock across files.
         self._mic_start_ts = None
         self._system_start_ts = None
+        # ChunkWriters per track, keyed "mic"/"mic2"/"system". Owned here,
+        # not by the streams — streams only put() into their sink.
+        self._writers = {}
 
     def set_capture_event_callbacks(self, pid_lost=None, capture_lost=None):
         """Register callbacks for ProcessAudioCapture events (per-app mode only)."""
@@ -372,6 +410,7 @@ class DualAudioCapture:
         self._capture_status = None
         self._mic_start_ts = None
         self._system_start_ts = None
+        self._writers = {}
 
         def _system_cb(chunk):
             if self._system_level_callback is not None:
@@ -379,36 +418,51 @@ class DualAudioCapture:
             self._check_silence(chunk)
 
         if self.capture_mode == "per_app" and self.app_pids:
+            writer = ChunkWriter(self.output_dir / "system_audio.wav",
+                                 self.sample_rate)
             self.system_stream = ProcessAudioCapture(
                 pids=self.app_pids,
                 sample_rate=self.sample_rate,
                 level_callback=_system_cb,
                 pid_lost_callback=self._pid_lost_callback,
                 capture_lost_callback=self._capture_lost_callback,
+                sink=writer,
             )
             status = self.system_stream.start()
             self._capture_status = status
             if status["active"] == 0:
+                self.system_stream = None
+                writer.abort()
                 raise RuntimeError(
                     f"Per-app capture failed for all selected apps: {status['failures']}"
                 )
+            self._writers["system"] = writer
+            writer.release(prepad_frames=0)
             self._system_start_ts = time.monotonic()
         elif self.loopback_device is not None:
+            writer = None
             try:
                 dev_info = sd.query_devices(self.loopback_device)
                 device_name = dev_info.get("name", "")
                 logger.info("System audio: looking for loopback of '%s'", device_name)
 
+                writer = ChunkWriter(self.output_dir / "system_audio.wav",
+                                     self.sample_rate)
                 self.system_stream = LoopbackStream(
                     device_name=device_name,
                     sample_rate=self.sample_rate,
                     level_callback=_system_cb,
+                    sink=writer,
                 )
                 self.system_stream.start()
+                self._writers["system"] = writer
+                writer.release(prepad_frames=0)
                 self._system_start_ts = time.monotonic()
             except Exception as e:
                 logger.error("Failed to start system audio capture: %s", e)
                 self.system_stream = None
+                if writer is not None:
+                    writer.abort()
         else:
             logger.warning("No system audio device selected")
 
@@ -421,16 +475,25 @@ class DualAudioCapture:
 
         # Microphone capture (sounddevice). A mic failure must not orphan the
         # already-running system capture (COM clients / PyAudio / mixer thread).
+        # Single mic streams straight to mic_audio.wav; dual mics stream to
+        # per-mic temps that stop() mixes and removes.
+        dual_mic = self.mic_device is not None and self.mic_device_2 is not None
         try:
             if self.mic_device is not None:
+                mic1_name = "mic1_raw.wav" if dual_mic else "mic_audio.wav"
+                writer = ChunkWriter(self.output_dir / mic1_name,
+                                     self.sample_rate)
+                self._writers["mic"] = writer
                 self.mic_stream = AudioStream(
                     device_index=self.mic_device,
                     sample_rate=self.sample_rate,
                     channels=1,
                     level_callback=_mic_cb,
+                    sink=writer,
                 )
                 self.mic_stream.start()
                 self._mic_start_ts = time.monotonic()
+                writer.release(self._alignment_prepad_frames(self._mic_start_ts))
                 if self._muted:
                     self.mic_stream.set_muted(True)
                 if self.mic_gain != 1.0:
@@ -441,13 +504,19 @@ class DualAudioCapture:
 
             # Second microphone capture (optional)
             if self.mic_device_2 is not None:
+                mic2_name = "mic2_raw.wav" if dual_mic else "mic_audio.wav"
+                writer2 = ChunkWriter(self.output_dir / mic2_name,
+                                      self.sample_rate)
+                self._writers["mic2"] = writer2
                 self.mic_stream_2 = AudioStream(
                     device_index=self.mic_device_2,
                     sample_rate=self.sample_rate,
                     channels=1,
                     level_callback=_mic_cb,
+                    sink=writer2,
                 )
                 self.mic_stream_2.start()
+                writer2.release(self._alignment_prepad_frames(time.monotonic()))
                 if self._muted:
                     self.mic_stream_2.set_muted(True)
                 if self.mic_gain != 1.0:
@@ -461,7 +530,11 @@ class DualAudioCapture:
         self._start_time = time.time()
 
     def _stop_streams_quietly(self):
-        """Best-effort stop of every started stream; never raises."""
+        """Best-effort stop of every started stream and writer; never raises.
+
+        Only used on start() failure — writers are aborted (files deleted),
+        matching the old design where nothing was saved before stop().
+        """
         for stream in (self.mic_stream, self.mic_stream_2, self.system_stream):
             if stream is not None:
                 try:
@@ -471,6 +544,12 @@ class DualAudioCapture:
         self.mic_stream = None
         self.mic_stream_2 = None
         self.system_stream = None
+        for writer in self._writers.values():
+            try:
+                writer.abort()
+            except Exception:
+                logger.exception("Error aborting writer during cleanup")
+        self._writers = {}
 
     def pause(self):
         if self.mic_stream:
@@ -498,9 +577,11 @@ class DualAudioCapture:
     def stop(self):
         """Stop recording and return paths to saved audio files.
 
-        Every stop/save step is individually guarded: a failing device (e.g.
-        mic unplugged mid-call) or file write must not prevent stopping the
-        other streams or saving the other tracks.
+        Tracks were streamed to disk during capture; this closes the writers
+        and assembles mic_audio/combined block-wise. Every step is
+        individually guarded: a failing device (e.g. mic unplugged mid-call)
+        or file write must not prevent stopping the other streams or saving
+        the other tracks.
         """
         self._recording = False
         if self._start_time:
@@ -509,7 +590,7 @@ class DualAudioCapture:
 
         results = {"mic": None, "system": None, "combined": None}
 
-        # Stop all streams first so nothing keeps capturing while we save.
+        # Stop all streams first so nothing keeps capturing while we finish.
         for label, stream in (("mic", self.mic_stream),
                               ("mic 2", self.mic_stream_2),
                               ("system", self.system_stream)):
@@ -519,47 +600,49 @@ class DualAudioCapture:
                 except Exception:
                     logger.exception("Failed to stop %s stream", label)
 
-        try:
-            mic_data = self._get_mixed_mic_data()
-        except Exception:
-            logger.exception("Failed to read mic audio")
-            mic_data = np.array([], dtype=np.float32)
-
-        sys_data = np.array([], dtype=np.float32)
-        if self.system_stream:
+        # Close writers — drains queues, deletes zero-frame files.
+        for key, writer in self._writers.items():
             try:
-                sys_data = self.system_stream.get_audio_data()
-                if sys_data.ndim > 1:
-                    sys_data = sys_data.mean(axis=1).astype(np.float32)
+                writer.stop()
             except Exception:
-                logger.exception("Failed to read system audio")
+                logger.exception("Failed to close %s writer", key)
+        self._writers = {}
 
-        # Align tracks on wall-clock start so the remote side doesn't lead
-        # the mic by the system-activation delay for the whole recording.
-        mic_data, sys_data = self._apply_start_alignment(mic_data, sys_data)
+        mic_path = self.output_dir / "mic_audio.wav"
+        sys_path = self.output_dir / "system_audio.wav"
 
+        # Dual-mic: mix the per-mic temps into mic_audio.wav, drop the temps.
         try:
-            if mic_data.size > 0:
-                mic_path = self.output_dir / "mic_audio.wav"
-                sf.write(str(mic_path), mic_data, self.sample_rate)
-                results["mic"] = str(mic_path)
+            temps = [p for p in (self.output_dir / "mic1_raw.wav",
+                                 self.output_dir / "mic2_raw.wav")
+                     if p.exists()]
+            if temps:
+                mix_wav_files(temps, mic_path, weights=[1.0] * len(temps),
+                              sample_rate=self.sample_rate,
+                              normalize="if_clipping")
+                for p in temps:
+                    p.unlink(missing_ok=True)
         except Exception:
-            logger.exception("Failed to save mic audio")
+            logger.exception("Failed to mix mic tracks")
 
-        try:
-            if sys_data.size > 0:
-                sys_path = self.output_dir / "system_audio.wav"
-                sf.write(str(sys_path), sys_data, self.sample_rate)
-                results["system"] = str(sys_path)
-        except Exception:
-            logger.exception("Failed to save system audio")
+        if mic_path.exists():
+            results["mic"] = str(mic_path)
+        if sys_path.exists():
+            results["system"] = str(sys_path)
 
-        # Create combined audio for transcription
+        # Combined track for transcription: equal-weight mix normalized to
+        # 0.95 peak; a lone track is copied verbatim (old behavior).
         try:
-            combined = self._create_combined_audio(mic_data, sys_data)
-            if combined is not None:
-                combined_path = self.output_dir / "combined_audio.wav"
-                sf.write(str(combined_path), combined, self.sample_rate)
+            combined_path = self.output_dir / "combined_audio.wav"
+            if results["mic"] and results["system"]:
+                mix_wav_files([mic_path, sys_path], combined_path,
+                              weights=[0.5, 0.5],
+                              sample_rate=self.sample_rate,
+                              normalize="always")
+                results["combined"] = str(combined_path)
+            elif results["mic"] or results["system"]:
+                shutil.copyfile(results["mic"] or results["system"],
+                                str(combined_path))
                 results["combined"] = str(combined_path)
         except Exception:
             logger.exception("Failed to create combined audio")
@@ -569,84 +652,21 @@ class DualAudioCapture:
     # Offsets beyond this are clock anomalies, not real startup skew.
     _MAX_ALIGNMENT_SECONDS = 30.0
 
-    def _apply_start_alignment(self, mic_data, sys_data):
-        """Front-pad the later-starting track so t=0 matches wall-clock."""
-        if self._mic_start_ts is None or self._system_start_ts is None:
-            return mic_data, sys_data
-        if mic_data.size == 0 or sys_data.size == 0:
-            return mic_data, sys_data
-        delta = self._mic_start_ts - self._system_start_ts
-        if abs(delta) > self._MAX_ALIGNMENT_SECONDS:
+    def _alignment_prepad_frames(self, stream_start_ts):
+        """Leading-silence frames for a mic track starting after the system.
+
+        The system side activates first (per-app COM activation can cost
+        ~1s); prepadding the mic keeps t=0 wall-clock-aligned across files.
+        """
+        if self._system_start_ts is None or stream_start_ts is None:
+            return 0
+        delta = stream_start_ts - self._system_start_ts
+        if delta <= 0:
+            return 0
+        if delta > self._MAX_ALIGNMENT_SECONDS:
             logger.warning("Implausible stream start offset %.1fs — skipping alignment", delta)
-            return mic_data, sys_data
-        pad = int(round(abs(delta) * self.sample_rate))
-        if pad <= 0:
-            return mic_data, sys_data
-        zeros = np.zeros(pad, dtype=np.float32)
-        if delta > 0:   # mic started later — it's missing leading audio
-            mic_data = np.concatenate([zeros, mic_data])
-        else:
-            sys_data = np.concatenate([zeros, sys_data])
-        return mic_data, sys_data
-
-    def _get_mixed_mic_data(self):
-        """Get audio from all mic streams, mixed together."""
-        mic1 = self.mic_stream.get_audio_data() if self.mic_stream else np.array([], dtype=np.float32)
-        mic2 = self.mic_stream_2.get_audio_data() if self.mic_stream_2 else np.array([], dtype=np.float32)
-
-        if mic1.size == 0 and mic2.size == 0:
-            return np.array([], dtype=np.float32)
-        if mic2.size == 0:
-            if mic1.ndim > 1:
-                return mic1.mean(axis=1).astype(np.float32)
-            return mic1
-        if mic1.size == 0:
-            if mic2.ndim > 1:
-                return mic2.mean(axis=1).astype(np.float32)
-            return mic2
-
-        # Both mics have data — ensure mono then mix
-        if mic1.ndim > 1:
-            mic1 = mic1.mean(axis=1).astype(np.float32)
-        if mic2.ndim > 1:
-            mic2 = mic2.mean(axis=1).astype(np.float32)
-
-        max_len = max(len(mic1), len(mic2))
-        if len(mic1) < max_len:
-            mic1 = np.pad(mic1, (0, max_len - len(mic1)))
-        if len(mic2) < max_len:
-            mic2 = np.pad(mic2, (0, max_len - len(mic2)))
-
-        mixed = mic1 + mic2
-        peak = np.abs(mixed).max()
-        if peak > 1.0:
-            mixed = mixed / peak * 0.95
-        return mixed
-
-    def _create_combined_audio(self, mic_data, sys_data):
-        """Mix already-aligned mono mic and system tracks into one."""
-        if mic_data.size == 0 and sys_data.size == 0:
-            return None
-
-        if mic_data.size == 0:
-            return sys_data
-
-        if sys_data.size == 0:
-            return mic_data
-
-        # Pad shorter to match longer
-        max_len = max(len(mic_data), len(sys_data))
-        if len(mic_data) < max_len:
-            mic_data = np.pad(mic_data, (0, max_len - len(mic_data)))
-        if len(sys_data) < max_len:
-            sys_data = np.pad(sys_data, (0, max_len - len(sys_data)))
-
-        # Mix at equal volume, normalize to prevent clipping
-        combined = mic_data * 0.5 + sys_data * 0.5
-        peak = np.abs(combined).max()
-        if peak > 0:
-            combined = combined / peak * 0.95
-        return combined
+            return 0
+        return int(round(delta * self.sample_rate))
 
     def _note_mic_activity(self, chunk):
         """Called from wrapped mic callbacks. Stamps mic activity.

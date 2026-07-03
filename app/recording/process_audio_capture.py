@@ -329,18 +329,19 @@ class ProcessAudioCapture:
     """
 
     def __init__(self, pids, sample_rate=16000, level_callback=None,
-                 enable_buffer=True, pid_lost_callback=None,
-                 capture_lost_callback=None):
+                 pid_lost_callback=None, capture_lost_callback=None,
+                 sink=None):
         self.pids = list(pids)
         self.sample_rate = sample_rate
         self._level_callback = level_callback
         self._pid_lost_callback = pid_lost_callback
         self._capture_lost_callback = capture_lost_callback
-        self._enable_buffer = enable_buffer
+        # Mixed audio goes to the sink (a ChunkWriter) as it's produced;
+        # sink=None is the level-meter-only configuration.
+        self._sink = sink
         self._streams = {}                     # {pid: ProcessCaptureStream}
         self._running = False
         self._paused = False
-        self._all_chunks = []
         self._thread = None
         self._active_last_tick = set()
         self._crashed = False
@@ -394,8 +395,8 @@ class ProcessAudioCapture:
                     for pid, tail in tails.items():
                         self._streams[pid].put_back_tail(tail)
                     if mixed.size > 0:
-                        if self._enable_buffer:
-                            self._all_chunks.append(mixed)
+                        if self._sink is not None:
+                            self._sink.put(mixed)
                         if self._level_callback:
                             self._level_callback(mixed)
 
@@ -476,7 +477,10 @@ class ProcessAudioCapture:
         return status
 
     def stop(self):
-        """Stop the mixer thread and release all streams. Returns a result dict."""
+        """Stop the mixer thread and release all streams. Returns a result dict.
+
+        The sink (writer) is owned and closed by DualAudioCapture, not here.
+        """
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=2.0)
@@ -488,32 +492,10 @@ class ProcessAudioCapture:
             except Exception:
                 logger.exception("Error releasing stream %s", s.pid)
 
-        mixed = (np.concatenate(self._all_chunks, axis=0)
-                 if self._all_chunks else np.array([], dtype=np.float32))
-
-        result = {
-            "mixed_audio": mixed,
+        return {
             "active_pids": self.active_pids,
             "crashed": self._crashed,
         }
-        return result
-
-    def save_to_file(self, filepath):
-        """Write buffered mixed audio to a WAV file. Returns the path, or None if empty."""
-        import soundfile as sf
-        if not self._all_chunks:
-            return None
-        data = np.concatenate(self._all_chunks, axis=0)
-        if data.size == 0:
-            return None
-        sf.write(str(filepath), data, self.sample_rate)
-        return str(filepath)
-
-    def get_audio_data(self):
-        """Return buffered mixed audio as a mono float32 array."""
-        if not self._all_chunks:
-            return np.array([], dtype=np.float32)
-        return np.concatenate(self._all_chunks, axis=0)
 
     @property
     def is_active(self):

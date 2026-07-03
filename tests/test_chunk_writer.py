@@ -119,6 +119,16 @@ class TestChunkWriter(unittest.TestCase):
         data, _ = sf.read(str(self.path), dtype="float32")
         self.assertEqual(len(data), 16)
 
+    def test_abort_deletes_file_even_with_frames_written(self):
+        # Failed DualAudioCapture.start() discards everything — matches the
+        # old in-RAM behavior where nothing was ever saved.
+        w = self._make()
+        w.release(prepad_frames=0)
+        w.put(np.ones(160, dtype=np.float32))
+        self.assertTrue(_wait_for(lambda: w.frames_written == 160))
+        w.abort()
+        self.assertFalse(self.path.exists())
+
     def test_multichannel_chunks_downmixed_to_mono(self):
         # Streams hand over device-shaped chunks; mic device chunks are
         # (frames, 1) — writer flattens to mono.
