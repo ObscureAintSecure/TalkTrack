@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
         self._auto_record_timer.setSingleShot(True)
         self._auto_record_timer.timeout.connect(self._on_auto_record_timer_fired)
 
-        self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summary")
+        self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summarizer")
         self.setMinimumSize(1000, 700)
         self.resize(1260, 800)
 
