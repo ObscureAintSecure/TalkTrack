@@ -4,6 +4,8 @@ from app.ai.provider import AIProvider
 
 
 class GeminiProvider(AIProvider):
+    embed_model_id = "st:all-MiniLM-L6-v2"
+
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         import google.generativeai as genai
         genai.configure(api_key=api_key)

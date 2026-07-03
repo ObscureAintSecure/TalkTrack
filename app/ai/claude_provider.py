@@ -4,6 +4,8 @@ from app.ai.provider import AIProvider
 
 
 class ClaudeProvider(AIProvider):
+    embed_model_id = "st:all-MiniLM-L6-v2"
+
     def __init__(self, api_key: str, model: str = "claude-sonnet-4-6"):
         from anthropic import Anthropic
         # Explicit timeout — the SDK default (~10 min) leaves workers hung

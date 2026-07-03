@@ -11,6 +11,7 @@ class LocalProvider(AIProvider):
     def __init__(self, model_path: str, embed_model: str = "all-MiniLM-L6-v2"):
         self._model_path = model_path
         self._embed_model_name = embed_model
+        self.embed_model_id = f"st:{embed_model}"
         self._llm = None
 
     def _get_llm(self):

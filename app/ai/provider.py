@@ -19,6 +19,11 @@ class AIProvider(ABC):
     # 100k+ token windows; local models override with their real n_ctx limit.
     max_context_chars = 100_000
 
+    # Identity of the model embed() uses — the key for on-disk embedding
+    # caches (#33). None disables caching for the provider. Must change
+    # whenever the vectors would (different model = incompatible vectors).
+    embed_model_id = None
+
     @abstractmethod
     def complete(self, prompt: str, context: str = "") -> str:
         ...

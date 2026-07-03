@@ -242,6 +242,7 @@ TalkTrack/
 - summary.md: AI-generated meeting summary
 - action_items.json: Extracted action items with assignees
 - chat_history.json: Chat conversation history
+- embeddings.npz: Cached segment embeddings for semantic search (auto-invalidated on edit)
 
 ## Setup Instructions
 

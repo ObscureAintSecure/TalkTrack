@@ -4,6 +4,8 @@ from app.ai.provider import AIProvider
 
 
 class MistralProvider(AIProvider):
+    embed_model_id = "st:all-MiniLM-L6-v2"
+
     def __init__(self, api_key: str, model: str = "mistral-large-latest"):
         from mistralai import Mistral
         import httpx

@@ -1,6 +1,6 @@
 # AI Providers: config keys, context limits, timeouts, embed cache
 
-Conventions from issues #13, #15, #30, #31, #36.
+Conventions from issues #13, #15, #30, #31, #33, #36.
 
 ## Config keys
 
@@ -23,7 +23,8 @@ Conventions from issues #13, #15, #30, #31, #36.
 ## Embeddings
 
 - All local-embedding providers use `provider.get_sentence_transformer(name)` (module-level cache). Never instantiate `SentenceTransformer` directly — per-call construction cost seconds and re-downloaded on first use (#31).
-- Search runs in `recordings_list._SearchWorker` (QThread, latest-query-wins). Corpus embeddings are still recomputed per search — persistence is open issue #33.
+- Search runs in `recordings_list._SearchWorker` (QThread, latest-query-wins).
+- **Per-recording embedding cache (#33)**: each recording dir gets `embeddings.npz` mapping sha1(segment text) → vector, keyed by `provider.embed_model_id`. `embedding_cache.get_corpus_vectors` embeds only cache misses and prunes stale hashes — transcript edits invalidate per segment automatically. Every provider must set `embed_model_id` (base default None = caching disabled); it MUST change whenever `embed()`'s vectors would (`st:<sentence-transformer name>` / `openai:<api model>` convention). A model-id mismatch or corrupt npz drops the whole file for that recording — never mix vectors across models.
 
 ## Error surfacing
 

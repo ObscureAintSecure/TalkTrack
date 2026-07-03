@@ -50,7 +50,8 @@ class _SearchWorker(QThread):
                 ai_config = config.data.get("ai", {})
                 provider = create_provider(ai_config)
                 if provider is not None:
-                    results = semantic_search(self._query, transcripts, provider)
+                    results = semantic_search(self._query, transcripts, provider,
+                                              recordings_dir=self._recordings_dir)
             except Exception:
                 logger.exception("Semantic search failed — falling back to text")
         if results is None:

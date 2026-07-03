@@ -4,6 +4,8 @@ from app.ai.provider import AIProvider
 
 
 class GrokProvider(AIProvider):
+    embed_model_id = "st:all-MiniLM-L6-v2"
+
     def __init__(self, api_key: str, model: str = "grok-3"):
         from openai import OpenAI
         self._client = OpenAI(

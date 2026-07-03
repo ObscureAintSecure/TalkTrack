@@ -9,6 +9,7 @@ class OpenAIProvider(AIProvider):
         self._client = OpenAI(api_key=api_key, timeout=120.0)
         self._model = model
         self._embed_model = "text-embedding-3-small"
+        self.embed_model_id = f"openai:{self._embed_model}"
 
     def complete(self, prompt: str, context: str = "") -> str:
         messages = []

@@ -50,33 +50,41 @@ def text_search(query, transcripts):
     return results
 
 
-def semantic_search(query, transcripts, provider):
+def semantic_search(query, transcripts, provider, recordings_dir=None):
     """Search transcripts using semantic similarity via an AI provider.
 
-    Uses the provider's embed() method to compute cosine similarity between
-    the query and all transcript segments. Returns top results above threshold.
+    Computes cosine similarity between the query and all transcript
+    segments. When recordings_dir is given, per-recording embedding caches
+    (#33) are used so only new/changed segments are embedded. Returns top
+    results above threshold.
     """
-    corpus = []
+    per_recording = []   # (rec_dir or None, [texts])
     corpus_meta = []
     for rec_id, segments in transcripts.items():
+        texts = []
         for seg in segments:
             text = seg.get("text", "").strip()
             if text:
-                corpus.append(text)
+                texts.append(text)
                 corpus_meta.append({
                     "recording_id": rec_id,
                     "text": text,
                     "start": seg.get("start", 0.0),
                     "speaker": seg.get("speaker", ""),
                 })
-    if not corpus:
+        if texts:
+            rec_dir = Path(recordings_dir) / rec_id if recordings_dir else None
+            per_recording.append((rec_dir, texts))
+    if not corpus_meta:
         return []
 
     import numpy as np
-    all_texts = [query] + corpus
-    embeddings = provider.embed(all_texts)
-    query_emb = np.array(embeddings[0])
-    corpus_embs = np.array(embeddings[1:])
+    from app.ai.embedding_cache import get_corpus_vectors
+    query_emb = np.array(provider.embed([query])[0])
+    corpus_embs = np.vstack([
+        get_corpus_vectors(rec_dir, texts, provider)
+        for rec_dir, texts in per_recording
+    ])
 
     query_norm = query_emb / (np.linalg.norm(query_emb) + 1e-10)
     corpus_norms = corpus_embs / (np.linalg.norm(corpus_embs, axis=1, keepdims=True) + 1e-10)
