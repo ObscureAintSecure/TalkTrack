@@ -45,6 +45,7 @@ TalkTrack/
       segment_player.py               # Audio clip playback for transcript segments
     recording/
       audio_capture.py                 # AudioStream, DualAudioCapture (legacy + per-app modes)
+      chunk_writer.py                  # ChunkWriter: streams capture audio to disk (#32)
       process_audio_capture.py         # ProcessCaptureStream, ProcessAudioCapture (Win11 per-PID)
       recorder.py                      # State machine, session management
     transcription/
@@ -92,6 +93,7 @@ TalkTrack/
     test_platform_info.py             # Windows version detection tests
     test_audio_session_monitor.py     # Audio session enumeration tests
     test_process_audio_capture.py     # Mixer and capture stream tests
+    test_chunk_writer.py              # Streaming disk writer tests
     test_dual_audio_capture.py        # Per-app mode integration tests
     test_dependency_checker.py        # Dependency checker tests
     test_transcriber.py               # TranscriptSegment/TranscriptResult tests
