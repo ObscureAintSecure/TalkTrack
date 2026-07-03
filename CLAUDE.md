@@ -9,6 +9,9 @@ Topic-specific rules are in `.claude/rules/`. `ways-of-working.md` is always loa
 - [audio-pipeline.md](.claude/rules/audio-pipeline.md) — AudioStream callback order, mute/gain scoping, MainWindow→capture access pattern.
 - [per-app-audio-capture.md](.claude/rules/per-app-audio-capture.md) — Windows 11 process-loopback COM invariants (IAgileObject, device path, ctypes arg passing, generator caching gotcha).
 - [ui-patterns.md](.claude/rules/ui-patterns.md) — CollapsibleSection, left-panel conventions, DAW meter fill direction, peak-sample bar semantics, Qt QSS gotchas, Catppuccin palette.
+- [packaging-and-launch.md](.claude/rules/packaging-and-launch.md) — uv-first `.venv` install, CPU/CUDA torch extras, dep version caps, taskbar-icon-via-Start-Menu-shortcut (no exe), uv-on-Windows cache gotcha.
+- [transcription-pipeline.md](.claude/rules/transcription-pipeline.md) — worker session binding, serial job queue, shutdown handling, model caches, SimpleDiarizer invariants.
+- [ai-providers.md](.claude/rules/ai-providers.md) — provider config keys, context limits, per-SDK timeout conventions, shared embed cache, error surfacing.
 
 ## Project Overview
 
@@ -157,6 +160,10 @@ TalkTrack/
 - **Silence auto-stop:** monitors system/app audio (not mic) for sustained silence, auto-stops recording after configurable duration (Settings > General)
 - **Continue from here:** checkbox next to Play All — click any segment to start continuous playback from that point
 - **Smart scroll during playback:** auto-scroll to playing segment is suppressed if user has manually scrolled away
+- **Silent-capture warning:** per-app recordings that receive zero audio for 15s trigger a one-shot warning (Teams/Zoom opt out of process-loopback; suggests legacy mode)
+- **Recovered recordings:** crash-orphaned recording dirs (audio but no metadata) are salvaged on startup as "Recovered" entries — never auto-deleted
+- **Transcription queue:** back-to-back recordings queue for transcription instead of being dropped; jobs run serially with the session bound at start
+- **Notes autosave:** switching recordings saves the previous recording's notes before loading the new ones
 
 ## Architecture Notes
 
@@ -165,7 +172,7 @@ TalkTrack/
 **Per-App Mode (Win11 only):**
 - `ProcessCaptureStream`: Captures audio from a single process by PID using Win11 `ActivateAudioInterfaceAsync` COM API
 - `ProcessAudioCapture`: Manages multiple ProcessCaptureStreams, mixes output in real-time
-- Supports live add/remove of apps during recording
+- PIDs are locked at `start()` — no live add/remove during a recording
 - Uses `PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE` to capture process + children
 
 **Legacy Mode (Win10/fallback):**
@@ -237,6 +244,9 @@ TalkTrack/
 ## Setup Instructions
 
 ### Basic Setup
+
+Preferred: run `start.bat` (uv-first, creates an isolated `.venv`, never touches global Python; see [packaging-and-launch.md](.claude/rules/packaging-and-launch.md)). Plain-pip path still works:
+
 ```bash
 pip install -r requirements.txt
 python main.py
@@ -265,6 +275,7 @@ python -m pytest tests/ -v
 - QThread workers for background processing (transcription, diarization)
 - Signals/slots for inter-component communication
 - Config stored as JSON, loaded via config.py utility
+- Durable file writes (transcript, metadata, notes, config) go through `app/utils/atomic_io.py` (temp file + `os.replace`) — never bare `open(w)` for user data
 - Dark theme by default (Catppuccin Mocha palette)
 - All audio processing uses numpy arrays at 16000 Hz sample rate (speech-optimized)
 - Tests use unittest with mock for hardware-dependent code

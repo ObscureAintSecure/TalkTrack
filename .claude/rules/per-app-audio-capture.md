@@ -26,6 +26,14 @@ Per `mmdeviceapi.h`: `#define VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK L"VAD\\Proce
 
 `ProcessCaptureStream._drain_real_source` re-enters `read_next_packet` on every `read_available()` call. A generator that `return`s once is permanently dead — caching one made the stream go silent after the first empty tick. If a COM packet drain loop feels "idiomatic to make a generator", resist.
 
+## Interpret buffers with the Initialize format, never GetMixFormat
+
+The engine delivers buffers in the format passed to `Initialize` (we request 48000/2/float32) — NOT the endpoint mix format. Deriving `native_rate/channels/format/frame_bytes` from `GetMixFormat()` pitch-shifted audio ~8.8% on 44.1 kHz endpoints and over-read the buffer 3x on surround mixes (fixed in #22). `activate_process_loopback` now derives all four from the requested format; keep it that way.
+
+## Silent-capture detection (conferencing opt-out warning)
+
+`ProcessCaptureStream.received_audio` flips on the first non-silent sample (`read_available`); `ProcessAudioCapture.has_received_audio` aggregates; `DualAudioCapture.system_audio_received()` returns True for legacy/no-system configs. `MainWindow._check_silent_capture` warns once at 15s of recording with zero audio received (the Teams/Zoom opt-out symptom). Keep these in sync when touching packet handling.
+
 ## HRESULT `0x8000000E` = `E_ILLEGAL_METHOD_CALL`, not a device error
 
 Generic-facility severity-only HRESULT meaning "precondition violated / object in wrong state". Three different PIDs returning the same `0x8000000E` synchronously means a handler or argument config bug — not PID-specific. Check IAgileObject, device path, handler QueryInterface, and PROPVARIANT layout in that order.
