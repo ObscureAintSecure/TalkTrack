@@ -768,12 +768,14 @@ class MainWindow(QMainWindow):
         model_size = self.config.get("transcription", "model_size")
         language = self.config.get("transcription", "language")
         device = self.config.get("transcription", "device")
+        batch_size = self.config.get("transcription", "batch_size")
 
         self._transcription_worker = TranscriptionWorker(
             audio_path=audio_path,
             model_size=model_size,
             language=language,
             device=device,
+            batch_size=batch_size,
         )
         self._transcription_worker.session = session
         self._transcription_worker.progress.connect(self._on_transcription_progress)
