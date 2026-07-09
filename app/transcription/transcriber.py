@@ -142,12 +142,17 @@ class TranscriptionWorker(QThread):
 
     cancelled = pyqtSignal()
 
-    def __init__(self, audio_path, model_size="base", language=None, device="cpu"):
+    def __init__(self, audio_path, model_size="base", language=None, device="cpu",
+                 batch_size=8):
         super().__init__()
         self.audio_path = audio_path
         self.model_size = model_size
         self.language = language
         self.device = device
+        # batch_size > 1 uses faster-whisper's BatchedInferencePipeline (VAD-chunked
+        # parallel decode, typically several times faster). batch_size == 1 keeps the
+        # classic sequential path (which retains condition_on_previous_text).
+        self.batch_size = batch_size
         self._cancel_requested = False
 
     def cancel(self):
@@ -193,12 +198,23 @@ class TranscriptionWorker(QThread):
                 self.cancelled.emit()
                 return
 
-            self.progress.emit("Transcribing audio...")
-            segments_gen, info = model.transcribe(
-                self.audio_path,
-                language=self.language,
-                vad_filter=True,
-            )
+            if self.batch_size and self.batch_size > 1:
+                self.progress.emit(f"Transcribing audio (batched, batch size {self.batch_size})...")
+                from faster_whisper import BatchedInferencePipeline
+                pipeline = BatchedInferencePipeline(model=model)
+                segments_gen, info = pipeline.transcribe(
+                    self.audio_path,
+                    language=self.language,
+                    vad_filter=True,
+                    batch_size=self.batch_size,
+                )
+            else:
+                self.progress.emit("Transcribing audio...")
+                segments_gen, info = model.transcribe(
+                    self.audio_path,
+                    language=self.language,
+                    vad_filter=True,
+                )
 
             result = TranscriptResult(
                 language=info.language,

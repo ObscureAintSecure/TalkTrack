@@ -8,14 +8,23 @@ from app.transcription.transcriber import TranscriptSegment, TranscriptResult
 
 
 class _FwMocks:
-    """Build a mocked faster_whisper module returning given segments."""
+    """Build a mocked faster_whisper module returning given segments.
+
+    Wires both the sequential path (``WhisperModel.transcribe``) and the
+    batched path (``BatchedInferencePipeline(model=...).transcribe``).
+    """
 
     def __init__(self, segments=(), duration=5.0):
+        segs = list(segments)
         self.module = MagicMock()
         self.model = MagicMock()
         self.module.WhisperModel.return_value = self.model
         info = MagicMock(language="en", duration=duration)
-        self.model.transcribe.return_value = (iter(list(segments)), info)
+        self.model.transcribe.return_value = (iter(segs), info)
+        # Batched pipeline: BatchedInferencePipeline(model=...).transcribe(...)
+        self.pipeline = MagicMock()
+        self.module.BatchedInferencePipeline.return_value = self.pipeline
+        self.pipeline.transcribe.return_value = (iter(segs), info)
 
 
 class TestWhisperModelCache(unittest.TestCase):
@@ -41,12 +50,13 @@ class TestWhisperModelCache(unittest.TestCase):
 
 class TestRunSegmentMapping(unittest.TestCase):
     def _run_worker(self, segments):
+        # batch_size=1 exercises the classic sequential path (model.transcribe).
         fw = _FwMocks(segments=segments)
         with patch.dict(sys.modules, {"faster_whisper": fw.module}):
             import app.transcription.transcriber as tr
             tr._MODEL_CACHE.clear()
             worker = tr.TranscriptionWorker(
-                "a.wav", model_size="base", device="cpu"
+                "a.wav", model_size="base", device="cpu", batch_size=1
             )
             results = []
             worker.finished.connect(results.append)
@@ -120,6 +130,45 @@ class TestComputeTypeSelection(unittest.TestCase):
         t.cuda.get_device_capability.side_effect = RuntimeError("no driver")
         captured, _ = self._run("cuda", t)
         self.assertEqual(captured["compute_type"], "float16")
+class TestBatchedInference(unittest.TestCase):
+    """batch_size selects BatchedInferencePipeline (>1) vs the sequential path (1)."""
+
+    def _run(self, batch_size, segments=()):
+        fw = _FwMocks(segments=segments)
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            worker = tr.TranscriptionWorker(
+                "a.wav", model_size="base", device="cpu", batch_size=batch_size
+            )
+            results = []
+            worker.finished.connect(results.append)
+            worker.run()
+        return results, fw
+
+    def test_batched_path_used_when_batch_size_gt_1(self):
+        _, fw = self._run(8)
+        fw.module.BatchedInferencePipeline.assert_called_once_with(model=fw.model)
+        self.assertEqual(fw.pipeline.transcribe.call_args.kwargs.get("batch_size"), 8)
+        fw.model.transcribe.assert_not_called()
+
+    def test_batched_transcribe_enables_vad(self):
+        _, fw = self._run(4)
+        self.assertTrue(fw.pipeline.transcribe.call_args.kwargs.get("vad_filter"))
+
+    def test_sequential_path_when_batch_size_1(self):
+        _, fw = self._run(1)
+        fw.module.BatchedInferencePipeline.assert_not_called()
+        fw.model.transcribe.assert_called_once()
+
+    def test_batched_segments_mapped_to_result(self):
+        seg = MagicMock(start=0.0, end=2.0, text=" hi ", avg_logprob=-0.2)
+        results, _ = self._run(8, segments=[seg])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].segments[0].text, "hi")
+        self.assertAlmostEqual(
+            results[0].segments[0].confidence, math.exp(-0.2), places=5
+        )
 
 
 class TestTranscriptSegment(unittest.TestCase):
