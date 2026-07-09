@@ -166,6 +166,7 @@ Choose a model in **Settings > Transcription** based on your speed/accuracy need
 | `small` | ~480 MB | Moderate | Better | ~2 GB |
 | `medium` | ~1.5 GB | Slow | Great | ~5 GB |
 | `large-v3` | ~3 GB | Slowest | Best | ~10 GB |
+| `large-v3-turbo` | ~1.6 GB | Fast | Near-best | ~6 GB |
 
 Models are downloaded automatically on first use and cached locally. No internet is needed after the initial download.
 
@@ -236,7 +237,7 @@ Access via the gear icon or **Edit > Settings**:
 
 | Setting | Options | Default |
 |---------|---------|---------|
-| Whisper Model | tiny, base, small, medium, large-v3 | small |
+| Whisper Model | tiny, base, small, medium, large-v3, large-v3-turbo | small |
 | Compute Device | CPU, CUDA (NVIDIA GPU) | CPU |
 | Language | Auto-detect, or specify (en, es, etc.) | Auto-detect |
 | Sample Rate | 16000, 22050, 44100, 48000 Hz | 16000 |
