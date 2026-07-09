@@ -4,21 +4,44 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
 
-# Loaded pyannote pipelines keyed by HF token. from_pretrained costs many
-# seconds; the pipeline stays resident between recordings by design.
+# Loaded pyannote pipelines keyed by (HF token, resolved device). from_pretrained
+# costs many seconds; the pipeline stays resident between recordings by design.
+# A CPU pipeline and a CUDA pipeline are distinct objects, hence the device in the key.
 _PIPELINE_CACHE = {}
 _PIPELINE_CACHE_LOCK = threading.Lock()
 
 
-def _get_pipeline(hf_token):
+def _resolve_device(device):
+    """Map a requested device to one torch can actually use, else 'cpu'.
+
+    pyannote uses fp32, so there is no pre-Volta float16 concern here (unlike
+    CTranslate2 in the transcriber). CUDA just needs to be available.
+    """
+    if device == "cuda":
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+    return "cpu"
+
+
+def _get_pipeline(hf_token, device="cpu"):
+    resolved = _resolve_device(device)
+    key = (hf_token, resolved)
     with _PIPELINE_CACHE_LOCK:
-        if hf_token not in _PIPELINE_CACHE:
+        if key not in _PIPELINE_CACHE:
             from pyannote.audio import Pipeline
-            _PIPELINE_CACHE[hf_token] = Pipeline.from_pretrained(
+            pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-community-1",
                 token=hf_token,
             )
-        return _PIPELINE_CACHE[hf_token]
+            if resolved == "cuda":
+                import torch
+                pipeline.to(torch.device("cuda"))
+            _PIPELINE_CACHE[key] = pipeline
+        return _PIPELINE_CACHE[key]
 
 
 @dataclass
@@ -36,13 +59,14 @@ class DiarizationWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, audio_path, transcript_result, hf_token="",
-                 min_speakers=None, max_speakers=None):
+                 min_speakers=None, max_speakers=None, device="cpu"):
         super().__init__()
         self.audio_path = audio_path
         self.transcript_result = transcript_result
         self.hf_token = hf_token
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
+        self.device = device
 
     def run(self):
         try:
@@ -57,7 +81,9 @@ class DiarizationWorker(QThread):
                 )
                 return
 
-            pipeline = _get_pipeline(self.hf_token)
+            pipeline = _get_pipeline(self.hf_token, self.device)
+            if _resolve_device(self.device) == "cuda":
+                self.progress.emit("Running speaker diarization on GPU...")
 
             self.progress.emit("Loading audio for diarization...")
 

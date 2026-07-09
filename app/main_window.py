@@ -868,6 +868,7 @@ class MainWindow(QMainWindow):
         hf_token = self.config.get("diarization", "hf_token")
         min_speakers = self.config.get("diarization", "min_speakers")
         max_speakers = self.config.get("diarization", "max_speakers")
+        device = self.config.get("transcription", "device")
 
         self._diarization_worker = DiarizationWorker(
             audio_path=audio_path,
@@ -875,6 +876,7 @@ class MainWindow(QMainWindow):
             hf_token=hf_token,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
+            device=device,
         )
         self._diarization_worker.session = session
         self._diarization_worker.progress.connect(self._on_transcription_progress)

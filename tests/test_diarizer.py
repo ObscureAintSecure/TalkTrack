@@ -89,5 +89,69 @@ class TestSimpleDiarizeWorkerExists(unittest.TestCase):
         self.assertTrue(hasattr(SimpleDiarizeWorker, "error"))
 
 
+def _fake_torch(cuda_available):
+    t = MagicMock()
+    t.cuda.is_available.return_value = cuda_available
+    t.device.side_effect = lambda d: f"device:{d}"
+    return t
+
+
+class TestPipelineDeviceSelection(unittest.TestCase):
+    """The pyannote pipeline moves to CUDA when available; CPU otherwise."""
+
+    def _get_pipeline(self, device, cuda_available):
+        pa = MagicMock()  # mocked pyannote.audio module
+        pipeline = MagicMock()
+        pa.Pipeline.from_pretrained.return_value = pipeline
+        torch_mod = _fake_torch(cuda_available)
+        with patch.dict(sys.modules, {"pyannote.audio": pa, "torch": torch_mod}):
+            import app.transcription.diarizer as dz
+            dz._PIPELINE_CACHE.clear()
+            dz._get_pipeline("tok", device)
+        return pipeline, torch_mod
+
+    def test_cuda_available_moves_pipeline_to_gpu(self):
+        pipeline, torch_mod = self._get_pipeline("cuda", cuda_available=True)
+        torch_mod.device.assert_called_with("cuda")
+        pipeline.to.assert_called_once_with("device:cuda")
+
+    def test_cuda_unavailable_falls_back_to_cpu(self):
+        pipeline, _ = self._get_pipeline("cuda", cuda_available=False)
+        pipeline.to.assert_not_called()
+
+    def test_cpu_device_stays_on_cpu(self):
+        pipeline, _ = self._get_pipeline("cpu", cuda_available=True)
+        pipeline.to.assert_not_called()
+
+    def test_pipeline_cached_per_token_and_device(self):
+        pa = MagicMock()
+        pa.Pipeline.from_pretrained.side_effect = lambda *a, **k: MagicMock()
+        with patch.dict(sys.modules, {"pyannote.audio": pa, "torch": _fake_torch(True)}):
+            import app.transcription.diarizer as dz
+            dz._PIPELINE_CACHE.clear()
+            cuda1 = dz._get_pipeline("tok", "cuda")
+            cuda2 = dz._get_pipeline("tok", "cuda")
+            cpu1 = dz._get_pipeline("tok", "cpu")
+        self.assertIs(cuda1, cuda2)      # same (token, cuda) reused
+        self.assertIsNot(cuda1, cpu1)    # different resolved device -> different pipeline
+        self.assertEqual(pa.Pipeline.from_pretrained.call_count, 2)
+
+
+class TestResolveDevice(unittest.TestCase):
+    def test_cuda_available(self):
+        with patch.dict(sys.modules, {"torch": _fake_torch(True)}):
+            import app.transcription.diarizer as dz
+            self.assertEqual(dz._resolve_device("cuda"), "cuda")
+
+    def test_cuda_unavailable(self):
+        with patch.dict(sys.modules, {"torch": _fake_torch(False)}):
+            import app.transcription.diarizer as dz
+            self.assertEqual(dz._resolve_device("cuda"), "cpu")
+
+    def test_cpu_passthrough(self):
+        import app.transcription.diarizer as dz
+        self.assertEqual(dz._resolve_device("cpu"), "cpu")
+
+
 if __name__ == "__main__":
     unittest.main()
