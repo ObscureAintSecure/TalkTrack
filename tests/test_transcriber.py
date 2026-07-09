@@ -67,6 +67,61 @@ class TestRunSegmentMapping(unittest.TestCase):
         self.assertNotIn("word_timestamps", kwargs)
 
 
+class TestComputeTypeSelection(unittest.TestCase):
+    """compute_type is int8 on CPU and on pre-Volta GPUs; float16 only on Volta+."""
+
+    def _run(self, device, torch_module=None):
+        fw = _FwMocks()
+        captured = {}
+
+        def fake_get_model(model_size, dev, compute_type):
+            captured["device"] = dev
+            captured["compute_type"] = compute_type
+            return fw.model
+
+        mods = {"faster_whisper": fw.module}
+        if torch_module is not None:
+            mods["torch"] = torch_module
+        with patch.dict(sys.modules, mods):
+            import app.transcription.transcriber as tr
+            with patch.object(tr, "_get_model", side_effect=fake_get_model):
+                worker = tr.TranscriptionWorker(
+                    "a.wav", model_size="base", device=device
+                )
+                messages = []
+                worker.progress.connect(messages.append)
+                worker.run()
+        return captured, messages
+
+    def _torch(self, available=True, capability=(7, 0)):
+        t = MagicMock()
+        t.cuda.is_available.return_value = available
+        t.cuda.get_device_capability.return_value = capability
+        return t
+
+    def test_cpu_uses_int8(self):
+        captured, _ = self._run("cpu")
+        self.assertEqual(captured["device"], "cpu")
+        self.assertEqual(captured["compute_type"], "int8")
+
+    def test_cuda_volta_or_newer_uses_float16(self):
+        captured, _ = self._run("cuda", self._torch(capability=(7, 0)))
+        self.assertEqual(captured["device"], "cuda")
+        self.assertEqual(captured["compute_type"], "float16")
+
+    def test_cuda_pre_volta_falls_back_to_int8(self):
+        captured, messages = self._run("cuda", self._torch(capability=(6, 1)))
+        self.assertEqual(captured["device"], "cuda")
+        self.assertEqual(captured["compute_type"], "int8")
+        self.assertTrue(any("pre-Volta" in m for m in messages))
+
+    def test_cuda_capability_probe_failure_keeps_float16(self):
+        t = self._torch()
+        t.cuda.get_device_capability.side_effect = RuntimeError("no driver")
+        captured, _ = self._run("cuda", t)
+        self.assertEqual(captured["compute_type"], "float16")
+
+
 class TestTranscriptSegment(unittest.TestCase):
 
     def test_to_dict_without_original_text(self):
