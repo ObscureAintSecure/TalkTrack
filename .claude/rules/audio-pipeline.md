@@ -44,6 +44,17 @@ The level meter and waveform see the processed signal (what's actually being rec
   appears at stop, and it feeds the recovered-recordings salvage (writers flush ~5s so crashed
   WAVs stay header-valid).
 
+## WASAPI loopback and WAV-flush facts (verified on real hardware)
+
+- WASAPI loopback delivers **no packets when nothing renders** — an empty/missing
+  `system_audio.wav` with silence on the endpoint is correct behavior, not a capture bug.
+  Real-hardware smoke tests must render a tone (`sd.play(sine, 48000)`) to exercise the
+  loopback→writer path.
+- `soundfile.SoundFile.flush()` does update the WAV header frame count (libsndfile
+  `sf_write_sync`) — a mid-recording copy of the file parses as valid WAV. ChunkWriter's
+  crash-readability guarantee depends on this; `test_flush_keeps_file_readable_before_close`
+  encodes it.
+
 ## MainWindow → capture access pattern
 
 - `MainWindow` reaches into `self.recorder._capture` directly for `set_muted`, `set_gain`, etc. This is the established pattern — do **not** add a `Recorder.set_muted`/`set_gain` passthrough. Recorder stays focused on state machine + session lifecycle.
