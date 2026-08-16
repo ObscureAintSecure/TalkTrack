@@ -212,6 +212,7 @@ class SettingsDialog(QDialog):
         self.model_combo.addItem("small (balanced)", "small")
         self.model_combo.addItem("medium (slower, better accuracy)", "medium")
         self.model_combo.addItem("large-v3 (slowest, best accuracy)", "large-v3")
+        self.model_combo.addItem("large-v3-turbo (near large-v3 accuracy, much faster)", "large-v3-turbo")
         whisper_form.addRow("Model Size:", self.model_combo)
 
         self.device_combo = QComboBox()
