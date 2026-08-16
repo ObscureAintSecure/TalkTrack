@@ -173,7 +173,20 @@ class TranscriptionWorker(QThread):
                     self.progress.emit("PyTorch not found — falling back to CPU.")
                     device = "cpu"
 
-            compute_type = "float16" if device == "cuda" else "int8"
+            if device == "cuda":
+                compute_type = "float16"
+                try:
+                    import torch
+                    major, _ = torch.cuda.get_device_capability()
+                    if major < 7:  # pre-Volta (Pascal and older): no efficient fp16, but int8 works (DP4A)
+                        compute_type = "int8"
+                        self.progress.emit(
+                            "GPU is pre-Volta — using int8 compute (float16 unsupported)."
+                        )
+                except Exception:
+                    pass  # keep float16; worst case the existing error surfaces
+            else:
+                compute_type = "int8"
             model = _get_model(self.model_size, device, compute_type)
 
             if self._cancel_requested:
