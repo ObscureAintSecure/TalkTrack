@@ -11,10 +11,16 @@ gh api user --jq .login                       # expect ObscureAintSecure
 gh auth switch --user ObscureAintSecure       # if it says Buddy-Bergman_Lumen
 ```
 
-The work account is an Enterprise Managed User and cannot write to a personal repo. It fails with
-`GraphQL: Unauthorized: As an Enterprise Managed User, you cannot access this content`, which reads
-like a permissions bug rather than a wrong-account one. `git push` succeeds under either account —
-only the REST/GraphQL API is gated — so a working push proves nothing about which account is active.
+The work account is an Enterprise Managed User and cannot write to this repo at all. Two different
+symptoms, same cause:
+
+- API writes: `GraphQL: Unauthorized: As an Enterprise Managed User, you cannot access this content`
+- `git push`: `remote: Permission to ObscureAintSecure/TalkTrack.git denied to Buddy-Bergman_Lumen`
+  (403) — the credential helper follows the active `gh` account
+
+Neither error names the real problem, so both read as permissions bugs. The active account flips
+back to the work one on its own, more than once per session — re-check it every time rather than
+trusting an earlier switch. A read-only `gh` call proves nothing; check `gh api user` specifically.
 
 ## Version control
 
