@@ -54,7 +54,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # Pinned exactly: setup-uv publishes no moving major tag (v10 does not
+      # resolve), unlike checkout and setup-python.
+      - uses: astral-sh/setup-uv@v10.0.1
       # Catches uv.lock drifting from pyproject.toml, which matters because the
       # torch extras are resolved from explicit indexes.
       - run: uv lock --check
