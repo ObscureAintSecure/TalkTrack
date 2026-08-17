@@ -1,6 +1,67 @@
 """Tests for DependencyChecker."""
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+
+class TestWhisperCacheDir(unittest.TestCase):
+    """The HF cache path must use each model's real publishing org, not a
+    hardcoded Systran — large-v3-turbo lives under mobiuslabsgmbh."""
+
+    def _cache_dir(self, model_size):
+        from app.utils.dependency_checker import whisper_cache_dir
+        return whisper_cache_dir(model_size)
+
+    def test_systran_model(self):
+        self.assertEqual(
+            self._cache_dir("large-v3").name,
+            "models--Systran--faster-whisper-large-v3",
+        )
+
+    def test_turbo_model_uses_its_own_org(self):
+        self.assertEqual(
+            self._cache_dir("large-v3-turbo").name,
+            "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo",
+        )
+
+    def test_unknown_model_falls_back_to_systran_layout(self):
+        self.assertEqual(
+            self._cache_dir("not-a-model").name,
+            "models--Systran--faster-whisper-not-a-model",
+        )
+
+    def test_falls_back_when_faster_whisper_unimportable(self):
+        import sys
+        with patch.dict(sys.modules, {"faster_whisper.utils": None}):
+            self.assertEqual(
+                self._cache_dir("large-v3").name,
+                "models--Systran--faster-whisper-large-v3",
+            )
+
+
+class TestCheckWhisperModel(unittest.TestCase):
+    """check_whisper_model finds a cached non-Systran model."""
+
+    def _check(self, model_size, cached_dirname):
+        from app.utils.dependency_checker import DependencyChecker
+        config = MagicMock()
+        config.get.return_value = model_size
+        with tempfile.TemporaryDirectory() as tmp:
+            hub = Path(tmp) / ".cache" / "huggingface" / "hub"
+            (hub / cached_dirname).mkdir(parents=True)
+            with patch("app.utils.dependency_checker.Path.home", return_value=Path(tmp)):
+                return DependencyChecker(config).check_whisper_model()
+
+    def test_cached_turbo_model_passes(self):
+        result = self._check(
+            "large-v3-turbo", "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"
+        )
+        self.assertTrue(result["passed"])
+
+    def test_uncached_model_fails(self):
+        result = self._check("large-v3-turbo", "models--Systran--faster-whisper-base")
+        self.assertFalse(result["passed"])
 
 
 class TestPackageMetadataCheck(unittest.TestCase):

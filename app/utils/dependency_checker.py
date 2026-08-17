@@ -7,6 +7,23 @@ from app.utils.audio_devices import get_input_devices, get_wasapi_output_devices
 from app.utils.platform_info import is_windows_11, get_windows_build
 
 
+def whisper_cache_dir(model_size):
+    """HuggingFace cache directory for a faster-whisper model.
+
+    Not every model is published by Systran — large-v3-turbo lives under
+    mobiuslabsgmbh — so the repo id comes from faster-whisper's own table
+    rather than a hardcoded org. Falls back to the Systran layout when the
+    lookup isn't available. (issue #73)
+    """
+    repo = f"Systran/faster-whisper-{model_size}"
+    try:
+        from faster_whisper.utils import _MODELS
+        repo = _MODELS.get(model_size, repo)
+    except Exception:
+        pass
+    return Path.home() / ".cache" / "huggingface" / "hub" / f"models--{repo.replace('/', '--')}"
+
+
 class DependencyChecker:
     """Checks system dependencies and reports their status."""
 
@@ -253,7 +270,7 @@ class DependencyChecker:
             except (KeyError, TypeError):
                 pass
 
-        cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / f"models--Systran--faster-whisper-{model_size}"
+        cache_dir = whisper_cache_dir(model_size)
         if cache_dir.exists():
             return {
                 "name": "Whisper Model",
