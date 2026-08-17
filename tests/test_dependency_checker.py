@@ -5,13 +5,31 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
+def _fake_fw_utils():
+    """Stub of faster_whisper.utils carrying a real _MODELS dict.
+
+    The tests can't import the real one: faster_whisper pulls in ctranslate2 ->
+    torch, and torch's DLL init fails inside the test process (WinError 1114).
+    That path is exercised separately by the unimportable-fallback test.
+    """
+    import types
+    mod = types.ModuleType("faster_whisper.utils")
+    mod._MODELS = {
+        "large-v3": "Systran/faster-whisper-large-v3",
+        "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    }
+    return mod
+
+
 class TestWhisperCacheDir(unittest.TestCase):
     """The HF cache path must use each model's real publishing org, not a
     hardcoded Systran — large-v3-turbo lives under mobiuslabsgmbh."""
 
     def _cache_dir(self, model_size):
+        import sys
         from app.utils.dependency_checker import whisper_cache_dir
-        return whisper_cache_dir(model_size)
+        with patch.dict(sys.modules, {"faster_whisper.utils": _fake_fw_utils()}):
+            return whisper_cache_dir(model_size)
 
     def test_systran_model(self):
         self.assertEqual(
@@ -33,9 +51,10 @@ class TestWhisperCacheDir(unittest.TestCase):
 
     def test_falls_back_when_faster_whisper_unimportable(self):
         import sys
+        from app.utils.dependency_checker import whisper_cache_dir
         with patch.dict(sys.modules, {"faster_whisper.utils": None}):
             self.assertEqual(
-                self._cache_dir("large-v3").name,
+                whisper_cache_dir("large-v3").name,
                 "models--Systran--faster-whisper-large-v3",
             )
 
@@ -44,13 +63,15 @@ class TestCheckWhisperModel(unittest.TestCase):
     """check_whisper_model finds a cached non-Systran model."""
 
     def _check(self, model_size, cached_dirname):
+        import sys
         from app.utils.dependency_checker import DependencyChecker
         config = MagicMock()
         config.get.return_value = model_size
         with tempfile.TemporaryDirectory() as tmp:
             hub = Path(tmp) / ".cache" / "huggingface" / "hub"
             (hub / cached_dirname).mkdir(parents=True)
-            with patch("app.utils.dependency_checker.Path.home", return_value=Path(tmp)):
+            with patch("app.utils.dependency_checker.Path.home", return_value=Path(tmp)), \
+                    patch.dict(sys.modules, {"faster_whisper.utils": _fake_fw_utils()}):
                 return DependencyChecker(config).check_whisper_model()
 
     def test_cached_turbo_model_passes(self):
