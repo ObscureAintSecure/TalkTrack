@@ -46,6 +46,32 @@ class TestSalvageOrphanedRecordings(unittest.TestCase):
         self.assertIn("combined", meta["audio_files"])
         self.assertTrue(meta["recovered"])
 
+    def test_orphan_with_mp3_audio_gets_metadata(self):
+        """MP3 output leaves no WAVs behind, so salvage must find MP3s too. (#60)"""
+        from app.ui.recordings_list import salvage_orphaned_recordings
+        d = self.root / "recording_20260101_130000"
+        d.mkdir()
+        data = np.zeros(16000, dtype=np.float32)
+        sf.write(str(d / "combined_audio.mp3"), data, 16000, format="MP3")
+        old = time.time() - 3600
+        os.utime(d, (old, old))
+        salvaged = salvage_orphaned_recordings(self.root, min_age_seconds=600)
+        self.assertEqual(salvaged, [str(d)])
+        meta = json.loads((d / "metadata.json").read_text(encoding="utf-8"))
+        self.assertTrue(meta["audio_files"]["combined"].endswith(".mp3"))
+        self.assertAlmostEqual(meta["duration"], 1.0, places=1)
+
+    def test_wav_preferred_when_both_present(self):
+        from app.ui.recordings_list import salvage_orphaned_recordings
+        d = self._make_dir("recording_20260101_140000",
+                           wavs=["combined_audio.wav"])
+        (d / "combined_audio.mp3").write_bytes(b"ID3" + b"\0" * 50)
+        old = time.time() - 3600  # age the dir last; writing files bumps its mtime
+        os.utime(d, (old, old))
+        salvage_orphaned_recordings(self.root, min_age_seconds=600)
+        meta = json.loads((d / "metadata.json").read_text(encoding="utf-8"))
+        self.assertTrue(meta["audio_files"]["combined"].endswith(".wav"))
+
     def test_dir_with_metadata_untouched(self):
         from app.ui.recordings_list import salvage_orphaned_recordings
         original = {"id": "x", "directory": "y", "name": "Keep me"}

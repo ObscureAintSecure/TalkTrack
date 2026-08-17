@@ -178,22 +178,41 @@ class Recorder(QObject):
             self._set_state(RecordingState.IDLE)
 
     def _convert_to_mp3(self, audio_files):
-        """Convert WAV files to MP3 using FFmpeg."""
-        mp3_files = {}
-        for key, wav_path in audio_files.items():
-            if wav_path and wav_path.endswith(".wav"):
-                mp3_path = wav_path.replace(".wav", ".mp3")
-                try:
-                    subprocess.run(
-                        ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame",
-                         "-qscale:a", "2", mp3_path],
-                        capture_output=True, check=True, timeout=300,
-                    )
-                    mp3_files[key + "_mp3"] = mp3_path
-                except (subprocess.CalledProcessError, FileNotFoundError,
-                        subprocess.TimeoutExpired):
-                    pass  # FFmpeg missing, failed, or hung — keep the WAV
-        audio_files.update(mp3_files)
+        """Convert WAV files to MP3 using FFmpeg, replacing the originals.
+
+        Choosing MP3 output means MP3 is what the user wants left on disk, so
+        each converted WAV is deleted and its audio_files entry repointed at
+        the MP3 (issue #60). The WAV is only dropped once the MP3 is confirmed
+        written and non-empty — ffmpeg missing, failing, hanging, or exiting 0
+        without producing a file all leave the original untouched.
+        """
+        for key, wav_path in list(audio_files.items()):
+            if not wav_path or not wav_path.endswith(".wav"):
+                continue
+            mp3_path = wav_path.replace(".wav", ".mp3")
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", wav_path, "-codec:a", "libmp3lame",
+                     "-qscale:a", "2", mp3_path],
+                    capture_output=True, check=True, timeout=300,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError,
+                    subprocess.TimeoutExpired):
+                logger.warning("MP3 conversion failed for %s — keeping WAV", wav_path)
+                continue
+
+            try:
+                if os.path.getsize(mp3_path) <= 0:
+                    raise OSError("empty MP3")
+            except OSError:
+                logger.warning("MP3 for %s missing or empty — keeping WAV", wav_path)
+                continue
+
+            try:
+                os.remove(wav_path)
+            except OSError:
+                logger.warning("Could not delete %s after MP3 conversion", wav_path)
+            audio_files[key] = mp3_path
 
     def _start_timer(self):
         self._timer_running = True

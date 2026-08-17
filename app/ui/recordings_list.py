@@ -80,13 +80,17 @@ def salvage_orphaned_recordings(recordings_dir, min_age_seconds=600):
         if not entry.is_dir() or (entry / "metadata.json").exists():
             continue
 
+        # MP3 output replaces the WAVs (#60), so look for either. WAV wins when
+        # both exist — it's the lossless one and the conversion was incomplete.
         audio_files = {}
-        for key, fname in (("mic", "mic_audio.wav"),
-                           ("system", "system_audio.wav"),
-                           ("combined", "combined_audio.wav")):
-            path = entry / fname
-            if path.exists():
-                audio_files[key] = str(path)
+        for key, stem in (("mic", "mic_audio"),
+                          ("system", "system_audio"),
+                          ("combined", "combined_audio")):
+            for ext in (".wav", ".mp3"):
+                path = entry / f"{stem}{ext}"
+                if path.exists():
+                    audio_files[key] = str(path)
+                    break
         if not audio_files:
             continue
 
