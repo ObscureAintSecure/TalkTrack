@@ -1,5 +1,21 @@
 # Ways of Working: TalkTrack workflow rules and non-obvious gotchas
 
+## GitHub account
+
+**This repo is always the personal account `ObscureAintSecure`.** Two accounts sit in the `gh`
+keyring and the active one can flip between sessions. Check before anything that writes — issues,
+comments, PR merges:
+
+```
+gh api user --jq .login                       # expect ObscureAintSecure
+gh auth switch --user ObscureAintSecure       # if it says Buddy-Bergman_Lumen
+```
+
+The work account is an Enterprise Managed User and cannot write to a personal repo. It fails with
+`GraphQL: Unauthorized: As an Enterprise Managed User, you cannot access this content`, which reads
+like a permissions bug rather than a wrong-account one. `git push` succeeds under either account —
+only the REST/GraphQL API is gated — so a working push proves nothing about which account is active.
+
 ## Version control
 
 - Commits go directly to `master`. No feature branches, no worktrees for this project.
@@ -17,9 +33,6 @@
   `Closes #<issue>`. Keeps master linear so every `git pull` is a fast-forward.
 - Merge one at a time: pull, run the full suite, then merge the next. PRs touching the same
   function will conflict even when GitHub reports all of them as MERGEABLE.
-- `gh` can silently be authenticated as the wrong account (the Lumen EMU one), which fails with
-  `Unauthorized: As an Enterprise Managed User...`. Check with `gh api user --jq .login`;
-  fix with `gh auth switch --user ObscureAintSecure`.
 
 ## Issue tracking
 
