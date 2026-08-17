@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Install, import smoke and tests
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # The plain-pip path from the README, so CI exercises what a user
+      # without uv actually runs.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      # Imports only. Constructing MainWindow needs audio devices and a config,
+      # neither of which a runner has; this catches import-time breakage such as
+      # the torch/PyQt6 DLL ordering problem.
+      - name: Import smoke
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -c "import app.main_window"
+          python -c "import app.recording.recorder, app.recording.audio_capture, app.recording.chunk_writer"
+          python -c "import app.transcription.transcriber, app.transcription.diarizer"
+          python -c "import app.ui.settings_dialog, app.ui.recordings_list, app.ui.transcript_viewer"
+          python -c "import app.utils.config, app.utils.dependency_checker, app.utils.wav_prune"
+
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/ -v
+
+  uv-lock:
+    name: uv lock resolves
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # Catches uv.lock drifting from pyproject.toml, which matters because the
+      # torch extras are resolved from explicit indexes.
+      - run: uv lock --check
