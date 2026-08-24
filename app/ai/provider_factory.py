@@ -30,6 +30,13 @@ def create_provider(config: dict) -> AIProvider | None:
             model=config.get("model", "grok-3"),
         )
 
+    if provider_type == "groq":
+        from app.ai.groq_provider import GroqProvider
+        return GroqProvider(
+            api_key=config["api_key"],
+            model=config.get("model", "openai/gpt-oss-120b"),
+        )
+
     if provider_type == "gemini":
         from app.ai.gemini_provider import GeminiProvider
         return GeminiProvider(

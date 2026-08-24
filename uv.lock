@@ -1551,6 +1551,23 @@ wheels = [
 ]
 
 [[package]]
+name = "groq"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/67/3e/687064918e861082cb02165872bbda31269126a108a78794dae86ddadae2/groq-1.6.0.tar.gz", hash = "sha256:c4237ecf0053ba85fd926bb31cb4b178996310474b4618867994e3e40d8e3c02", size = 158424, upload-time = "2026-07-24T17:25:49.517Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/40/164338d796cf41ea5930a42023e986d8c993720bed670d5aa143e5854873/groq-1.6.0-py3-none-any.whl", hash = "sha256:fa16db582455db324adcff1b5908519474736872e28cd5c8fa2b8bef6860e12a", size = 143693, upload-time = "2026-07-24T17:25:48.2Z" },
+]
+
+[[package]]
 name = "grpcio"
 version = "1.81.1"
 source = { registry = "https://pypi.org/simple" }
@@ -5204,6 +5221,7 @@ dependencies = [
 all-ai = [
     { name = "anthropic" },
     { name = "google-generativeai" },
+    { name = "groq" },
     { name = "llama-cpp-python" },
     { name = "mistralai" },
     { name = "openai" },
@@ -5226,6 +5244,9 @@ gemini = [
 ]
 grok = [
     { name = "openai" },
+]
+groq = [
+    { name = "groq" },
 ]
 local = [
     { name = "llama-cpp-python" },
@@ -5250,6 +5271,8 @@ requires-dist = [
     { name = "faster-whisper", specifier = ">=1.0.0,<2" },
     { name = "google-generativeai", marker = "extra == 'all-ai'", specifier = ">=0.8.0" },
     { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.8.0" },
+    { name = "groq", marker = "extra == 'all-ai'", specifier = ">=0.11.0" },
+    { name = "groq", marker = "extra == 'groq'", specifier = ">=0.11.0" },
     { name = "llama-cpp-python", marker = "extra == 'all-ai'", specifier = ">=0.3.0" },
     { name = "llama-cpp-python", marker = "extra == 'local'", specifier = ">=0.3.0" },
     { name = "mistralai", marker = "extra == 'all-ai'", specifier = ">=1.0.0" },
@@ -5275,7 +5298,7 @@ requires-dist = [
     { name = "torchaudio", marker = "extra == 'cuda'", specifier = ">=2.0.0,<3", index = "https://download.pytorch.org/whl/cu126", conflict = { package = "talktrack", extra = "cuda" } },
     { name = "transformers", specifier = ">=4.45.0,<6" },
 ]
-provides-extras = ["claude", "openai", "grok", "gemini", "mistral", "local", "all-ai", "cpu", "cuda"]
+provides-extras = ["claude", "openai", "grok", "gemini", "mistral", "groq", "local", "all-ai", "cpu", "cuda"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]

@@ -59,6 +59,7 @@ TalkTrack/
       grok_provider.py                 # Grok (xAI) via OpenAI-compatible API
       gemini_provider.py               # Google Gemini API implementation
       mistral_provider.py              # Mistral AI API implementation
+      groq_provider.py                 # Groq (groq.com) API implementation
       local_provider.py                # Local model (llama-cpp-python)
       provider_factory.py              # Factory for configured provider
       summarizer.py                    # Meeting summary + action items
@@ -152,7 +153,7 @@ TalkTrack/
 - **Per-provider AI settings:** API keys and models stored separately per provider with status indicator
 - **Searchable history:** text and semantic search across all past recordings
 - **Chat with transcript:** ask AI questions about the current recording
-- **AI provider choice:** Claude, OpenAI, Grok, Gemini, Mistral, or local models via Settings > AI Assistant
+- **AI provider choice:** Claude, OpenAI, Grok, Gemini, Mistral, Groq, or local models via Settings > AI Assistant
 - **Hidden devices filter:** hide unwanted audio devices (e.g., Voicemeeter) from dropdowns
 - **Capture settings persistence:** remembers capture mode (per-app vs legacy) and selected apps
 - **Min duration filter:** skip auto-transcription for short recordings (configurable in Settings)
@@ -217,7 +218,7 @@ TalkTrack/
 
 ### AI Provider System
 - Pluggable provider abstraction: `AIProvider` base class with `complete()` and `embed()` methods
-- Six implementations: Claude, OpenAI, Grok (xAI), Gemini (Google), Mistral, Local (llama-cpp-python)
+- Seven implementations: Claude, OpenAI, Grok (xAI), Gemini (Google), Mistral, Groq (groq.com), Local (llama-cpp-python)
 - Factory pattern via `create_provider(config)` — returns configured provider or None
 - AI SDK packages installed on-demand when user selects a provider (not bundled in requirements.txt)
 - Ad-hoc installer prompts user before installing, shows progress in settings dialog
@@ -235,7 +236,7 @@ TalkTrack/
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app"), selected_apps, hidden_devices, mic_count (1 or 2)
 - Audio device selection is per-session (not persisted), but capture mode and selected apps are persisted
 - Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
-- AI settings: provider (none/claude/openai/grok/gemini/mistral/local), provider_settings (per-provider api_key/model), auto_summarize
+- AI settings: provider (none/claude/openai/grok/gemini/mistral/groq/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, auto_record, silence_auto_stop, silence_duration
 
 ### Data Files Per Recording

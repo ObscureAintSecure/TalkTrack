@@ -32,7 +32,7 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **Speaker diarization** — two modes:
   - *Simple* (no setup): labels "You" vs "Remote" from mic vs system channels
   - *Full* (pyannote.audio): identifies individual speakers with a free HuggingFace token
-- **AI assistant** — optional AI-powered meeting summaries, action items, and transcript chat (supports Claude, OpenAI, Grok, Gemini, Mistral, or local models)
+- **AI assistant** — optional AI-powered meeting summaries, action items, and transcript chat (supports Claude, OpenAI, Grok, Gemini, Mistral, Groq, or local models)
 - **Per-provider AI settings** — API keys and models stored separately per provider, switch without losing config
 - **Manual AI generation** — generate or regenerate summaries and action items on demand
 - **Notes in AI context** — call notes are included in AI summary and action item generation
@@ -210,6 +210,7 @@ TalkTrack integrates with AI providers to generate meeting summaries, extract ac
 | **Grok** (xAI) | grok-3, grok-3-mini, grok-2 | `openai` |
 | **Google Gemini** | gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash | `google-generativeai` |
 | **Mistral** | mistral-large-latest, mistral-medium, mistral-small | `mistralai` |
+| **Groq** (groq.com) | openai/gpt-oss-120b, openai/gpt-oss-20b, qwen/qwen3.6-27b | `groq` |
 | **Local** | Any GGUF model via llama-cpp-python | `llama-cpp-python` |
 
 SDK packages are **installed automatically** when you select a provider — no need to install them manually. Configure your provider and API key in **Settings > AI**.
@@ -217,7 +218,7 @@ SDK packages are **installed automatically** when you select a provider — no n
 To pre-install a provider (e.g. for offline setup), use the optional extras:
 
 ```bash
-uv sync --extra claude       # or: openai, grok, gemini, mistral, local, all-ai
+uv sync --extra claude       # or: openai, grok, gemini, mistral, groq, local, all-ai
 # without uv:  pip install ".[claude]"
 ```
 
@@ -244,7 +245,7 @@ Access via the gear icon or **Edit > Settings**:
 | Output Format | WAV, MP3 (requires FFmpeg) | WAV |
 | Capture Mode | Per-app (Win11) or System Audio | Auto-detected |
 | Diarization | Enabled/Disabled, min/max speakers | Disabled |
-| AI Provider | None, Claude, OpenAI, Grok, Gemini, Mistral, Local | None |
+| AI Provider | None, Claude, OpenAI, Grok, Gemini, Mistral, Groq, Local | None |
 | AI Model | Provider-specific model list | Varies |
 | Min Recording Length | Discard recordings shorter than N seconds | 5s |
 | Auto-Record | Start recording when selected app joins a call | Off |
@@ -297,7 +298,7 @@ python -m pytest tests/ -v
 | Audio Capture | sounddevice, WASAPI, comtypes |
 | Transcription | faster-whisper |
 | Speaker Diarization | pyannote.audio 4.0 |
-| AI Providers | anthropic, openai, google-generativeai, mistralai (on-demand) |
+| AI Providers | anthropic, openai, google-generativeai, mistralai, groq (on-demand) |
 | Deep Learning | PyTorch |
 | Audio Processing | scipy, pydub, soundfile, numpy |
 | Windows Integration | pywin32, pycaw, comtypes |
