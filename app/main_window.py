@@ -466,7 +466,6 @@ class MainWindow(QMainWindow):
                 pids=pids,
                 sample_rate=self.config.get("audio", "sample_rate"),
                 level_callback=self.meters_panel.update_system_level,
-                enable_buffer=False,
             )
             status = monitor.start()
             if status["active"] == 0:
