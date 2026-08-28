@@ -21,10 +21,29 @@ Every pipeline worker (`TranscriptionWorker`, `DiarizationWorker`, `SimpleDiariz
 
 Diarization (full or simple) failing must still render/persist the successful transcript (`worker.transcript_result`). A silent drop here was the original #14 bug.
 
+## GPU diarization falls back to CPU on OOM (#74)
+
+`_get_pipeline(hf_token, device)` returns **`(pipeline, device_actually_used)`** — callers must
+not re-derive the device with `_resolve_device`, or a CUDA request that fell back reports as
+running on the GPU.
+
+Two OOM points, both handled:
+
+- **Moving to CUDA**: a failed `.to(cuda)` puts the pipeline back on CPU and caches it under the
+  `(token, "cpu")` key. A half-moved pipeline must never be handed out under the CUDA key.
+- **Inference**: only `_is_oom(exc)` is retried, on CPU, once. Everything else re-raises — a
+  shape bug masked by a silent CPU rerun is worse than the crash. The retry calls
+  `_release_cuda_pipeline`, which evicts the CUDA entry and `empty_cache()`s; keeping it would
+  re-try and re-fail on every later recording while still holding the VRAM that caused it.
+
+Why this exists: `transcriber._MODEL_CACHE` and `diarizer._PIPELINE_CACHE` are both resident by
+design, so a CUDA run pins the Whisper model and the pyannote pipeline in VRAM at once. `large-v3`
+alone is ~10 GB.
+
 ## Model caches — resident by design
 
 - `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type)`.
-- `diarizer._PIPELINE_CACHE` — pyannote Pipeline keyed by HF token.
+- `diarizer._PIPELINE_CACHE` — pyannote Pipeline keyed `(HF token, resolved device)`.
 - `provider.get_sentence_transformer()` — shared embed model cache.
 Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VRAM between recordings is intentional. Don't "fix" it.
 

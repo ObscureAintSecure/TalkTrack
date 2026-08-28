@@ -1,8 +1,11 @@
+import logging
 import threading
 from dataclasses import dataclass
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
+
+logger = logging.getLogger(__name__)
 
 # Loaded pyannote pipelines keyed by (HF token, resolved device). from_pretrained
 # costs many seconds; the pipeline stays resident between recordings by design.
@@ -27,21 +30,76 @@ def _resolve_device(device):
     return "cpu"
 
 
-def _get_pipeline(hf_token, device="cpu"):
-    resolved = _resolve_device(device)
-    key = (hf_token, resolved)
+def _is_oom(exc):
+    """True for a CUDA out-of-memory failure, which is retryable on the CPU.
+
+    Matched by message as well as by type: allocation failures also surface
+    from cuDNN/cuBLAS as a plain RuntimeError.
+    """
+    try:
+        import torch
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+    except Exception:
+        pass
+    return "out of memory" in str(exc).lower()
+
+
+def _release_cuda_pipeline(hf_token):
+    """Evict the cached CUDA pipeline and hand its VRAM back.
+
+    Called after an OOM. Keeping it cached would mean re-trying CUDA, failing
+    and falling back on every subsequent recording, while still holding the
+    memory that caused the problem.
+    """
     with _PIPELINE_CACHE_LOCK:
-        if key not in _PIPELINE_CACHE:
-            from pyannote.audio import Pipeline
-            pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-community-1",
-                token=hf_token,
-            )
-            if resolved == "cuda":
-                import torch
+        _PIPELINE_CACHE.pop((hf_token, "cuda"), None)
+    try:
+        import torch
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _get_pipeline(hf_token, device="cpu"):
+    """Return (pipeline, device_actually_used).
+
+    The caller gets the resolved device back rather than re-deriving it, so a
+    CUDA request that fell back to the CPU cannot be reported as running on
+    the GPU.
+    """
+    resolved = _resolve_device(device)
+    with _PIPELINE_CACHE_LOCK:
+        key = (hf_token, resolved)
+        if key in _PIPELINE_CACHE:
+            return _PIPELINE_CACHE[key], resolved
+
+        from pyannote.audio import Pipeline
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-community-1",
+            token=hf_token,
+        )
+        if resolved == "cuda":
+            import torch
+            try:
                 pipeline.to(torch.device("cuda"))
-            _PIPELINE_CACHE[key] = pipeline
-        return _PIPELINE_CACHE[key]
+            except Exception:
+                # Out of VRAM, or any other refusal to move. The pipeline may
+                # be half-moved, so put it back and cache it as the CPU one --
+                # never hand a partially-moved pipeline out under the CUDA key.
+                logger.warning(
+                    "Could not move diarization pipeline to CUDA; using CPU",
+                    exc_info=True,
+                )
+                try:
+                    pipeline.to(torch.device("cpu"))
+                except Exception:
+                    pass
+                resolved = "cpu"
+                key = (hf_token, resolved)
+
+        _PIPELINE_CACHE[key] = pipeline
+        return pipeline, resolved
 
 
 @dataclass
@@ -81,8 +139,8 @@ class DiarizationWorker(QThread):
                 )
                 return
 
-            pipeline = _get_pipeline(self.hf_token, self.device)
-            if _resolve_device(self.device) == "cuda":
+            pipeline, device_used = _get_pipeline(self.hf_token, self.device)
+            if device_used == "cuda":
                 self.progress.emit("Running speaker diarization on GPU...")
 
             self.progress.emit("Loading audio for diarization...")
@@ -107,7 +165,20 @@ class DiarizationWorker(QThread):
             if self.max_speakers is not None:
                 diarization_params["max_speakers"] = self.max_speakers
 
-            result = pipeline(audio_input, **diarization_params)
+            try:
+                result = pipeline(audio_input, **diarization_params)
+            except Exception as exc:
+                # Only OOM is retryable. Anything else is a real failure and
+                # must surface rather than be masked by a silent CPU rerun.
+                if device_used != "cuda" or not _is_oom(exc):
+                    raise
+                logger.warning("Diarization hit CUDA OOM; retrying on CPU")
+                self.progress.emit(
+                    "GPU out of memory - retrying speaker diarization on CPU..."
+                )
+                _release_cuda_pipeline(self.hf_token)
+                pipeline, device_used = _get_pipeline(self.hf_token, "cpu")
+                result = pipeline(audio_input, **diarization_params)
 
             # pyannote 4.0 returns DiarizeOutput; extract the Annotation
             if hasattr(result, "speaker_diarization"):
