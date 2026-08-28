@@ -7,7 +7,9 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # PR-only: a new push makes the previous PR run pointless, but cancelling on
+  # master would let a commit land on the default branch unverified (#83).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
