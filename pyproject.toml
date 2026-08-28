@@ -3,6 +3,8 @@ name = "talktrack"
 version = "0.1.0"
 description = "Record, transcribe, and diarize audio from calls (Teams, Zoom, etc.) on Windows."
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 # Heavy ML/numerical deps carry an upper bound capping the next major version,
 # where breaking changes concentrate (e.g. the numpy 1->2, transformers 4->5
 # jumps). This blocks a future `uv lock` or a plain-pip install from silently

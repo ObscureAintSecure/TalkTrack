@@ -316,3 +316,7 @@ python -m pytest tests/ -v
 - **Windows only** — uses WASAPI and Windows COM APIs
 - **Per-app capture requires Windows 11** Build 22000+
 - Per-process COM capture is in active development — the pipeline structure is in place, with packet reading being completed through real-device testing
+
+## License
+
+MIT — see [LICENSE](LICENSE).
