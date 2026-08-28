@@ -43,12 +43,14 @@ openai = ["openai>=1.50.0"]
 grok = ["openai>=1.50.0"]            # Grok (xAI) uses the OpenAI-compatible SDK
 gemini = ["google-generativeai>=0.8.0"]
 mistral = ["mistralai>=1.0.0"]
+groq = ["groq>=0.11.0"]              # Groq (groq.com), distinct from Grok above
 local = ["llama-cpp-python>=0.3.0"]
 all-ai = [
     "anthropic>=0.40.0",
     "openai>=1.50.0",
     "google-generativeai>=0.8.0",
     "mistralai>=1.0.0",
+    "groq>=0.11.0",
     "llama-cpp-python>=0.3.0",
 ]
 

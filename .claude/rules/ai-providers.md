@@ -26,6 +26,22 @@ Conventions from issues #13, #15, #30, #31, #33, #36.
 - Search runs in `recordings_list._SearchWorker` (QThread, latest-query-wins).
 - **Per-recording embedding cache (#33)**: each recording dir gets `embeddings.npz` mapping sha1(segment text) → vector, keyed by `provider.embed_model_id`. `embedding_cache.get_corpus_vectors` embeds only cache misses and prunes stale hashes — transcript edits invalidate per segment automatically. Every provider must set `embed_model_id` (base default None = caching disabled); it MUST change whenever `embed()`'s vectors would (`st:<sentence-transformer name>` / `openai:<api model>` convention). A model-id mismatch or corrupt npz drops the whole file for that recording — never mix vectors across models.
 
+## Model IDs go stale — check the vendor's deprecation page, not its model list
+
+Shipped model IDs rot. Groq's `/docs/models` page still listed
+`llama-3.3-70b-versatile` and `llama-3.1-8b-instant` as *production* well after
+`/docs/deprecations` recorded their 2026-08-16 shutdown for free/developer tier.
+Trusting the model list alone shipped a default that 404s on the first call
+(`model_not_found`) — auth and endpoint are fine, so it reads as a key problem.
+
+- When adding or refreshing a provider's list, read the **deprecation page too**.
+- Pin the default in a test. `test_ai_provider.DECOMMISSIONED_GROQ_MODELS` +
+  `test_default_model_is_a_live_groq_model` / `test_factory_default_is_a_live_groq_model`
+  exist because the provider default and the `provider_factory` default are written
+  in two places and only the factory one is used when a config omits `model`.
+- `settings_dialog.ai_model` is `setEditable(True)` for every provider, so a user
+  can always type a newer ID — the curated list is a convenience, not a constraint.
+
 ## Error surfacing
 
 - Summarize errors go through `_on_summarize_error` → panels' `set_error()` (restores prior content when it exists). Never leave panels in `set_loading` state on failure.
