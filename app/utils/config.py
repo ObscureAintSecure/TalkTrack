@@ -29,7 +29,7 @@ DEFAULT_CONFIG = {
         "language": None,
         "device": "cpu",
         "min_duration": 10,
-        "batch_size": 8,
+        "batch_size": 1,
     },
     "diarization": {
         "enabled": True,

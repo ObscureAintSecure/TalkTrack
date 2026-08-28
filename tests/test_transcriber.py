@@ -346,3 +346,21 @@ class TestToPlainText(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBatchSizeDefault(unittest.TestCase):
+    """Batching is opt-in. Config deep-merges defaults into an existing
+    settings.json, so a default above 1 would silently switch every installed
+    copy to batched decode — and with it drop cross-chunk
+    condition_on_previous_text — on the next launch."""
+
+    def test_worker_default_is_sequential(self):
+        import inspect
+        import app.transcription.transcriber as tr
+        default = inspect.signature(
+            tr.TranscriptionWorker.__init__).parameters["batch_size"].default
+        self.assertEqual(default, 1)
+
+    def test_config_default_is_sequential(self):
+        from app.utils.config import DEFAULT_CONFIG
+        self.assertEqual(DEFAULT_CONFIG["transcription"]["batch_size"], 1)

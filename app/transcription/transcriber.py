@@ -143,15 +143,17 @@ class TranscriptionWorker(QThread):
     cancelled = pyqtSignal()
 
     def __init__(self, audio_path, model_size="base", language=None, device="cpu",
-                 batch_size=8):
+                 batch_size=1):
         super().__init__()
         self.audio_path = audio_path
         self.model_size = model_size
         self.language = language
         self.device = device
         # batch_size > 1 uses faster-whisper's BatchedInferencePipeline (VAD-chunked
-        # parallel decode, typically several times faster). batch_size == 1 keeps the
-        # classic sequential path (which retains condition_on_previous_text).
+        # parallel decode, typically several times faster). It defaults to 1, the
+        # classic sequential path, because batching drops cross-chunk
+        # condition_on_previous_text and the default compute device is CPU, where
+        # there is little parallel-decode headroom to win back. Opt in per taste.
         self.batch_size = batch_size
         self._cancel_requested = False
 

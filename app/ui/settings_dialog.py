@@ -245,9 +245,10 @@ class SettingsDialog(QDialog):
         self.batch_size_spin.setRange(1, 16)
         self.batch_size_spin.setSpecialValueText("1 (sequential / classic)")
         self.batch_size_spin.setToolTip(
-            "Batched inference decodes VAD-chunked audio in parallel — typically\n"
-            "several times faster on long recordings. Higher values use more RAM.\n"
-            "Set to 1 for the classic sequential path (keeps cross-chunk context)."
+            "1 (the default) is the classic sequential path and keeps cross-chunk\n"
+            "context. Higher values decode VAD-chunked audio in parallel, which is\n"
+            "faster on long recordings and especially on CUDA, but drops that\n"
+            "context and uses more RAM."
         )
         whisper_form.addRow("Batch size:", self.batch_size_spin)
 
@@ -439,7 +440,7 @@ class SettingsDialog(QDialog):
         self.min_duration_spin.setValue(min_dur if min_dur else 0)
 
         batch_size = self.config.get("transcription", "batch_size")
-        self.batch_size_spin.setValue(batch_size if batch_size else 8)
+        self.batch_size_spin.setValue(batch_size if batch_size else 1)
 
         # Diarization
         self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
