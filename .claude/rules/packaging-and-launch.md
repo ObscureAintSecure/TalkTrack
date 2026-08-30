@@ -29,3 +29,19 @@
 
 - `uv sync --extra cuda` can fail with `failed to rename ... Access is denied (os error 5)` — antivirus (Defender) locking the ~2.4GB torch wheel in uv's cache during extraction. Retry, `uv cache clean`, exclude `%LOCALAPPDATA%\uv\cache`, or use the pip cu126 path. (issue #5)
 - An **interrupted** `uv sync` can gut a package's dist-info while leaving it importable: `importlib.metadata.version()` returns None and the app fails transcription with "Unable to compare versions … found=None" (raised in transformers via the faster-whisper import chain). Repair: close the app, `uv pip install --python .venv\Scripts\python.exe --force-reinstall <pkg>` — touches only that package. The System Status panel detects this (`check_package_metadata`, #41).
+
+## CI (#12, #83)
+
+`.github/workflows/ci.yml`, on push to master and on every PR. Two jobs, both windows-latest:
+
+- **test** — installs via `pip install -r requirements.txt` deliberately, not uv, so CI exercises
+  what a user without uv actually runs. Then an import smoke (catches import-time breakage like
+  the torch/PyQt6 DLL ordering problem, which no unit test would reach) and the full suite.
+- **uv-lock** — `uv lock --check`, since the torch extras resolve from explicit indexes and the
+  lock can drift from `pyproject.toml`.
+
+`cancel-in-progress` is scoped to pull requests only. Applying it to master cancelled superseded
+runs and let a commit land on the default branch unverified (happened once, to 9630438).
+
+`astral-sh/setup-uv` publishes **no moving major tag** — `@v10` does not resolve, so it is pinned
+exactly and needs manual bumps. `actions/checkout` and `actions/setup-python` do publish them.

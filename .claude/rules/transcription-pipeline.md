@@ -56,3 +56,20 @@ Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VR
 
 - `TranscriptSegment.confidence` = `exp(segment.avg_logprob)` — populated since #29.
 - `word_timestamps` is deliberately NOT requested (unused output, real alignment cost). If a feature needs word timing, re-enable it and actually consume `segment.words`.
+
+## Whisper model cache paths are not all under Systran (#73)
+
+`faster-whisper` publishes models under different orgs — `large-v3` is `Systran/...`,
+`large-v3-turbo` is `mobiuslabsgmbh/...`. Resolve the repo id from `faster_whisper.utils._MODELS`
+via `dependency_checker.whisper_cache_dir`, never interpolate an org into the path. Getting this
+wrong made System Status report a downloaded model as missing, at `critical` level, which
+auto-opens the status dialog on startup.
+
+## batch_size defaults to 1 and should stay there (#46)
+
+`transcription.batch_size > 1` uses `BatchedInferencePipeline`; 1 is the classic sequential path.
+Do not raise the default. `Config.load` deep-merges `DEFAULT_CONFIG` into an existing
+settings.json, so a higher default silently switches every installed copy to batched decode on
+next launch and trades away cross-chunk `condition_on_previous_text`. The default compute device
+is also `cpu`, where there is least parallel-decode headroom to win back. The worker and the
+config declare the default separately, so both are pinned by tests.

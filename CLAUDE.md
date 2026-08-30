@@ -35,6 +35,8 @@ TalkTrack is a Windows desktop application that records, transcribes, and diariz
 ```
 TalkTrack/
   main.py                              # Entry point, QApplication setup
+  LICENSE                              # MIT
+  .github/workflows/ci.yml             # CI: install + import smoke + suite + uv lock (windows-latest)
   start.bat                            # Launcher (uv-first, .venv isolation, falls back to pip)
   start_debug.bat                      # Debug launcher with console output
   requirements.txt                     # Dependencies
@@ -90,6 +92,7 @@ TalkTrack/
       config.py                       # JSON config management
       dependency_checker.py           # System health checks for status panel
       platform_info.py                # Windows version detection
+      wav_prune.py                    # Plans/applies removal of WAVs superseded by MP3s
   tests/
     test_platform_info.py             # Windows version detection tests
     test_audio_session_monitor.py     # Audio session enumeration tests
@@ -110,6 +113,11 @@ TalkTrack/
     test_summarizer.py                 # Summary prompt builder tests
     test_search_index.py               # Transcript search tests
     test_chat.py                       # Chat context builder tests
+    test_wav_prune.py                  # WAV-superseded-by-MP3 prune planning tests
+    test_recorder.py                   # MP3 conversion + WAV replacement tests
+    test_recordings_salvage.py         # Crash-orphan salvage tests
+    test_diarizer.py                   # Diarization device selection + CUDA OOM fallback tests
+    test_system_monitor_start.py       # Test Mic monitor construction regression (#79)
   resources/
     style.qss                          # Dark theme stylesheet (Catppuccin Mocha)
     talktrack.ico                      # App icon (multi-size: 16-256px)
@@ -118,6 +126,9 @@ TalkTrack/
     favicon.ico                        # Favicon for web use
     TT_icon_*.png                      # Icon source files (32, 64, 128, 256, 512px)
     TT_logo_*.png                      # Logo files (655x200, 1300x400)
+  scripts/
+    find_call_audio_pid.py             # Diagnostic: which PID renders call audio
+    prune_redundant_wavs.py            # One-time cleanup of pre-#60 duplicate WAVs
   docs/plans/                         # Design docs and implementation plans
   recordings/                         # Output directory
 ```
@@ -141,7 +152,7 @@ TalkTrack/
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names
 - Call notes with timestamp insertion
 - Browse and replay past recordings (with friendly names)
-- Settings for model size, sample rate, output format (WAV/MP3)
+- Settings for model size, sample rate, output format (WAV/MP3 — MP3 **replaces** the WAVs rather than sitting beside them)
 - Dark theme UI (Catppuccin Mocha palette)
 - **Audio level meters:** real-time VU meters for mic and system audio during recording
 - **Live waveform:** scrolling waveform visualization during recording
@@ -235,7 +246,7 @@ TalkTrack/
 - Stored at ~/.talktrack/settings.json
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app"), selected_apps, hidden_devices, mic_count (1 or 2)
 - Audio device selection is per-session (not persisted), but capture mode and selected apps are persisted
-- Transcription settings: model size (tiny/base/small/medium/large-v3), language, compute device, min_duration
+- Transcription settings: model size (tiny/base/small/medium/large-v3/large-v3-turbo), language, compute device, min_duration, batch_size (1 = sequential; see transcription-pipeline rules before changing the default)
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/groq/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, auto_record, silence_auto_stop, silence_duration
 

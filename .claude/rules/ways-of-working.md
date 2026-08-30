@@ -39,6 +39,21 @@ trusting an earlier switch. A read-only `gh` call proves nothing; check `gh api 
   `Closes #<issue>`. Keeps master linear so every `git pull` is a fast-forward.
 - Merge one at a time: pull, run the full suite, then merge the next. PRs touching the same
   function will conflict even when GitHub reports all of them as MERGEABLE.
+- **First-time contributors get no CI until you approve it.** Their runs sit as
+  `action_required`, so the PR shows no checks at all. Find them with
+  `gh api repos/ObscureAintSecure/TalkTrack/actions/runs --jq '.workflow_runs[] | select(.status=="action_required")'`
+  and approve with `gh api -X POST .../actions/runs/<id>/approve`.
+
+### Taking over a stale PR
+
+When a contributor goes quiet and their branch is conflicting, adopt it rather than closing it:
+
+1. `git fetch origin pull/N/head:prN`
+2. Check the real conflict scope first: `git merge-tree --write-tree --name-only HEAD prN`
+   (usually far smaller than GitHub's CONFLICTING badge implies)
+3. `git cherry-pick <their commits>` — preserves their authorship and adds no `Co-Authored-By`
+4. Put your own change in a **separate** commit on top, so the history shows who decided what
+5. Close the PR with a comment crediting them and explaining exactly what you changed
 
 ## Issue tracking
 
@@ -48,7 +63,13 @@ trusting an earlier switch. A read-only `gh` call proves nothing; check `gh api 
 ## Testing
 
 - **Non-UI logic**: TDD — write failing tests in `tests/`, confirm failure, implement, confirm pass.
-- **UI / PyQt code**: smoke-test with `python -c "from app.x import Y; ..."` — no Qt widget tests beyond pure-helper unit tests.
+- **UI / PyQt code**: smoke-test with `python -c "from app.x import Y; ..."`. Constructing real
+  widgets in tests is still out, but a UI *method* can be tested without Qt by calling it
+  against a stub self: `MainWindow._start_system_monitor(stub)`, `DiarizationWorker.run(stub)`
+  where `stub = MagicMock()` carrying the attributes the method touches. Patch collaborators
+  with `autospec=True` so a signature mismatch raises instead of being absorbed by a
+  permissive mock. #79 (Test Mic dead for ~7 weeks on a removed kwarg) survived precisely
+  because that path had no cover.
 - `python -m pytest tests/ -v` is the full suite. Run it with **global** `python`, never bare `uv run` — the `.venv` has no pytest, and `uv run` triggers a sync first (pulls CPU torch over the CUDA build, can die on locked DLLs and corrupt package metadata). If uv is required, pass `--no-sync`.
 - Tests use `unittest` + `pytest` runner, mocks for hardware-dependent code.
 - **Anything that reaches `torch` must be mocked, including through transitive imports.** In the
@@ -79,3 +100,11 @@ trusting an earlier switch. A read-only `gh` call proves nothing; check `gh api 
 ## Critical collaboration mode
 
 Always challenge before implementing: identify weak points, blind spots, missing context. Push back when the design is wrong even if the user pushes. Only fold when the user provides a stronger argument. Skill instructions are authoritative; user's global CLAUDE.md is the source of this rule.
+
+## Editing files from Bash
+
+Bash heredocs mangle backslash escapes. Writing a Python string literal that should contain
+a literal backslash-n through `<<'EOF'` yields a real newline instead, silently breaking the
+literal (cost one broken `settings_dialog.py` and a `git checkout` to recover). For content
+with escapes, build the string with `chr(92)` or replace by line index, then confirm with
+`python -c "import ast; ast.parse(open(path).read())"` before moving on.

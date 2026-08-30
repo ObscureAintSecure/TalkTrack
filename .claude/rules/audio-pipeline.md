@@ -59,3 +59,16 @@ The level meter and waveform see the processed signal (what's actually being rec
 
 - `MainWindow` reaches into `self.recorder._capture` directly for `set_muted`, `set_gain`, etc. This is the established pattern — do **not** add a `Recorder.set_muted`/`set_gain` passthrough. Recorder stays focused on state machine + session lifecycle.
 - Debounced config writes (gain slider): 500ms single-shot `QTimer` on `MainWindow`, flushed on `closeEvent`. `_pending_gain` tracks value between drag and flush.
+
+## MP3 output replaces the WAVs (#60, #77)
+
+- `Recorder._convert_to_mp3` deletes each WAV and repoints `audio_files[key]` at the MP3, so
+  transcription, diarization, playback and export all follow without knowing about the change.
+  It no longer adds `<key>_mp3` entries — nothing ever consumed them.
+- The WAV is dropped only after the MP3 is confirmed written and non-empty. ffmpeg missing,
+  failing, hanging, or exiting 0 with no output all leave the original alone. Keep that guard.
+- **There is no WAV fallback in an existing library.** `scripts/prune_redundant_wavs.py`
+  (logic in `app/utils/wav_prune.py`) removed the pre-fix duplicates. Anything reading recording
+  audio must go through soundfile (libsndfile 1.2.2 reads MP3) or faster-whisper, never assume WAV.
+- Crash-recovery salvage in `recordings_list` looks for both extensions, preferring WAV when both
+  are present — that means the conversion was interrupted.
