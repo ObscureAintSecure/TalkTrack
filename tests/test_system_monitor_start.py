@@ -58,6 +58,40 @@ class TestStartSystemMonitor(unittest.TestCase):
         self.assertIsNone(stub.system_monitor)
         stub.status_label.setText.assert_called_once()
 
+    def test_follow_default_monitor_resolves_current_output(self):
+        from app.main_window import MainWindow
+        stub = _stub_self(mode="legacy")
+        stub.source_selector.get_selected_loopback.return_value = -1
+        with patch("app.main_window.default_output_name", return_value="Headphones") as current, \
+             patch("app.main_window.sd.query_devices") as query, \
+             patch("app.main_window.LoopbackStream", autospec=True) as loopback:
+            MainWindow._start_system_monitor(stub)
+        current.assert_called_once_with()
+        query.assert_not_called()
+        self.assertEqual(loopback.call_args.kwargs["device_name"], "Headphones")
+        loopback.return_value.start.assert_called_once_with()
+
+    def test_fixed_output_monitor_uses_selected_device(self):
+        from app.main_window import MainWindow
+        stub = _stub_self(mode="legacy")
+        stub.source_selector.get_selected_loopback.return_value = 8
+        with patch("app.main_window.sd.query_devices", return_value={"name": "Speakers"}) as query, \
+             patch("app.main_window.LoopbackStream", autospec=True) as loopback:
+            MainWindow._start_system_monitor(stub)
+        query.assert_called_once_with(8)
+        self.assertEqual(loopback.call_args.kwargs["device_name"], "Speakers")
+        loopback.return_value.start.assert_called_once_with()
+
+    def test_disabled_output_monitor_starts_nothing(self):
+        from app.main_window import MainWindow
+        stub = _stub_self(mode="legacy")
+        stub.source_selector.get_selected_loopback.return_value = None
+        with patch("app.main_window.sd.query_devices") as query, \
+             patch("app.main_window.LoopbackStream", autospec=True) as loopback:
+            MainWindow._start_system_monitor(stub)
+        query.assert_not_called()
+        loopback.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,7 @@ TalkTrack is a Windows desktop app for **recording and transcribing Microsoft Te
 - **Record calls** with Record / Pause / Resume / Stop controls, live timer, and level meters
 - **Per-app audio capture** (Windows 11) — pick specific apps like Teams or Chrome
 - **System audio capture** (Windows 10+) — WASAPI loopback for all system audio
+- **Output switching** — follow the Windows default playback device or change the system output during a recording ([details and limits](docs/output-switching.md))
 - **Dual-channel recording** — microphone + system/app audio captured separately
 - **Auto-stop recording** — detects when your call app goes inactive and offers to stop
 - **Auto-start recording** — optionally start recording when a selected app joins a call (Settings > General)

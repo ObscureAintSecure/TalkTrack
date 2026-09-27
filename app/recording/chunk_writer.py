@@ -61,6 +61,11 @@ class ChunkWriter:
         self._prepad_frames = int(prepad_frames)
         self._released.set()
 
+    def put_silence(self, frames):
+        """Queue a gap without allocating a meeting-sized array in the callback."""
+        if not self._stopping and not self._discard and self.error is None:
+            self._queue.put(int(frames))
+
     def stop(self):
         """Drain the queue, close the file. Returns total frames written.
 
@@ -119,7 +124,13 @@ class ChunkWriter:
                     break
                 chunk = None
             if chunk is not None:
-                self._write(chunk)
+                if isinstance(chunk, int):
+                    while chunk > 0:
+                        size = min(chunk, self.sample_rate)
+                        self._write(np.zeros(size, dtype=np.float32))
+                        chunk -= size
+                else:
+                    self._write(chunk)
             now = time.monotonic()
             if now - last_flush >= self._flush_interval:
                 self._flush()

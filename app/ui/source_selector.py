@@ -8,7 +8,7 @@ from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 
 from app.utils.audio_devices import (
     get_input_devices, get_system_audio_devices,
-    get_default_mic, get_default_output
+    get_default_mic
 )
 from app.utils.platform_info import is_windows_11
 from app.ui.collapsible_section import CollapsibleSection
@@ -68,6 +68,7 @@ class SourceSelector(QWidget):
     # Payload is the new device index (or None for "don't record mic").
     # Not emitted during refresh_devices — signals are blocked there.
     mic_changed = pyqtSignal(object)
+    output_changed = pyqtSignal(object)
     # Emitted when all checked apps go inactive during recording
     apps_went_inactive = pyqtSignal()
     # Emitted when a checked app becomes active (for auto-record)
@@ -83,7 +84,9 @@ class SourceSelector(QWidget):
         self._win11 = is_windows_11()
         self._auto_refresh_timer = None
         self._had_active_apps = False
+        self._capture_active = False
         self._setup_ui()
+        self.loopback_combo.currentIndexChanged.connect(self._output_selected)
         self.refresh_devices()
         self._restore_capture_mode()
         self._update_section_title()
@@ -390,6 +393,9 @@ class SourceSelector(QWidget):
         return bool(self._had_active_apps)
 
     def refresh_devices(self):
+        if self._capture_active:
+            return  # Re-enumeration must not change microphone selection mid-call.
+        self.loopback_combo.blockSignals(True)
         # Block signals while rebuilding combos so clear/addItem don't
         # trigger _save_mic_selection with stale values
         self.mic_combo.blockSignals(True)
@@ -460,20 +466,23 @@ class SourceSelector(QWidget):
         self.loopback_combo.clear()
         self._loopback_devices = get_system_audio_devices(hidden_devices=hidden)
         self.loopback_combo.addItem("(None - don't record system audio)", None)
-        default_output = get_default_output()
-        default_lb_idx = 0
-
-        for i, dev in enumerate(self._loopback_devices):
+        self.loopback_combo.addItem("Follow Windows default output", -1)
+        for dev in self._loopback_devices:
             label = f"{dev['name']} (WASAPI Loopback)"
             self.loopback_combo.addItem(label, dev["index"])
-            if dev["index"] == default_output:
-                default_lb_idx = i + 1
 
-        if default_lb_idx > 0:
-            self.loopback_combo.setCurrentIndex(default_lb_idx)
-        elif self._loopback_devices:
-            # Default device didn't match — pick the first one
+        saved = self._config.data.get('audio', {}).get('last_system_output') if self._config else None
+        if saved is None:
             self.loopback_combo.setCurrentIndex(1)
+        elif saved == '__disabled__':
+            self.loopback_combo.setCurrentIndex(0)
+        else:
+            idx = self.loopback_combo.findText(saved + ' (WASAPI Loopback)')
+            if idx < 0:
+                self.loopback_combo.addItem(saved + ' (unavailable)', saved)
+                idx = self.loopback_combo.count() - 1
+            self.loopback_combo.setCurrentIndex(idx)
+        self.loopback_combo.blockSignals(False)
 
         # Refresh app list too
         if self._win11 and self.app_list is not None:
@@ -493,6 +502,20 @@ class SourceSelector(QWidget):
     def update_mic_count(self, count):
         """Show or hide the second microphone dropdown."""
         self._mic2_row_widget.setVisible(count >= 2)
+
+    def _output_selected(self):
+        value = self.loopback_combo.currentData()
+        if value == -1:
+            name = None
+        elif value is None:
+            name = '__disabled__'
+        elif isinstance(value, str):
+            name = value
+        else:
+            name = self.loopback_combo.currentText().removesuffix(' (WASAPI Loopback)')
+        if self._config:
+            self._config.set('audio', 'last_system_output', name)
+        self.output_changed.emit(name)
 
     def get_selected_loopback(self):
         """Return loopback device index for system audio capture."""
@@ -579,6 +602,7 @@ class SourceSelector(QWidget):
         self._config.set("audio", "last_mic2", mic2_text)
 
     def set_enabled(self, enabled):
+        self._capture_active = not enabled
         self.mic_combo.setEnabled(enabled)
         self.mic2_combo.setEnabled(enabled)
         self.loopback_combo.setEnabled(enabled)

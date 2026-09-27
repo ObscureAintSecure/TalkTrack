@@ -107,6 +107,7 @@ class LoopbackStream:
         self._paused = False
         self._native_rate = None
         self._native_channels = None
+        self._clock_offset = None
         # Polyphase resampler built on start() once native_rate is known.
         # Stateful across callback invocations — the previous FFT-based
         # scipy.signal.resample call resampled each chunk in isolation,
@@ -133,8 +134,11 @@ class LoopbackStream:
         # Find loopback device
         target_name = self._device_name
         for loopback in self._pa.get_loopback_device_info_generator():
-            if target_name and target_name in loopback["name"]:
+            if target_name and loopback["name"].removesuffix(" [Loopback]") == target_name:
                 return loopback
+
+        if target_name:
+            raise RuntimeError("Selected output is unavailable: " + target_name)
 
         # If no match, use default output's loopback
         wasapi_info = self._pa.get_host_api_info_by_index(wasapi_idx)
@@ -178,7 +182,13 @@ class LoopbackStream:
                 input_device_index=loopback_dev["index"],
                 frames_per_buffer=1024,
                 stream_callback=self._callback,
+                start=False,
             )
+            # Calibrate before callbacks run: arrival time can be delayed by the GIL.
+            before = time.monotonic()
+            stream_time = self._stream.get_time()
+            after = time.monotonic()
+            self._clock_offset = (before + after) / 2 - stream_time
             self._stream.start_stream()
         except Exception:
             # _find_loopback_device creates self._pa before it can fail —
@@ -211,7 +221,14 @@ class LoopbackStream:
                 return (None, pyaudio.paContinue)
 
             if self._sink is not None:
-                self._sink.put(mono)
+                put_timed = getattr(self._sink, "put_timed", None)
+                adc_time = time_info.get("input_buffer_adc_time") if time_info else None
+                if (callable(put_timed) and self._clock_offset is not None
+                        and isinstance(adc_time, (float, int)) and np.isfinite(adc_time)
+                        and adc_time != 0):
+                    put_timed(mono, self._clock_offset + adc_time)
+                else:
+                    self._sink.put(mono)
             if self._level_callback is not None:
                 self._level_callback(mono)
 
@@ -243,7 +260,12 @@ class LoopbackStream:
 
     @property
     def is_active(self):
-        return self._recording and self._stream is not None
+        if not self._recording or self._stream is None:
+            return False
+        try:
+            return self._stream.is_active()
+        except Exception:
+            return False
 
 
 def mix_wav_files(src_paths, out_path, weights, sample_rate,
@@ -442,13 +464,18 @@ class DualAudioCapture:
         elif self.loopback_device is not None:
             writer = None
             try:
-                dev_info = sd.query_devices(self.loopback_device)
-                device_name = dev_info.get("name", "")
+                if self.loopback_device == -1:
+                    device_name = None
+                elif isinstance(self.loopback_device, str):
+                    device_name = self.loopback_device
+                else:
+                    device_name = sd.query_devices(self.loopback_device).get("name", "")
                 logger.info("System audio: looking for loopback of '%s'", device_name)
 
                 writer = ChunkWriter(self.output_dir / "system_audio.wav",
                                      self.sample_rate)
-                self.system_stream = LoopbackStream(
+                from app.recording.output_switching import SwitchingLoopbackStream
+                self.system_stream = SwitchingLoopbackStream(
                     device_name=device_name,
                     sample_rate=self.sample_rate,
                     level_callback=_system_cb,
@@ -457,7 +484,7 @@ class DualAudioCapture:
                 self.system_stream.start()
                 self._writers["system"] = writer
                 writer.release(prepad_frames=0)
-                self._system_start_ts = time.monotonic()
+                self._system_start_ts = self.system_stream.timeline.started
             except Exception as e:
                 logger.error("Failed to start system audio capture: %s", e)
                 self.system_stream = None

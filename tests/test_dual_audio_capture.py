@@ -305,13 +305,14 @@ class TestDualAudioCaptureDispatch(unittest.TestCase):
             self.assertEqual(cap._capture_status["active"], 2)
             cap.stop()   # release writer file handles for tmpdir cleanup
 
-    def test_legacy_mode_uses_loopback_stream(self):
+    def test_legacy_mode_uses_switching_loopback_stream(self):
         from app.recording.audio_capture import DualAudioCapture
 
-        with patch("app.recording.audio_capture.LoopbackStream") as MockLS, \
+        with patch("app.recording.output_switching.SwitchingLoopbackStream") as MockLS, \
              patch("app.recording.audio_capture.sd.query_devices",
                    return_value={"name": "Speakers"}):
             mock_instance = MagicMock()
+            mock_instance.timeline.started = 123.0
             MockLS.return_value = mock_instance
 
             cap = DualAudioCapture(
@@ -320,6 +321,8 @@ class TestDualAudioCaptureDispatch(unittest.TestCase):
             )
             cap.start(output_dir=self.output_dir)
             MockLS.assert_called_once()
+            self.assertEqual(MockLS.call_args.kwargs["device_name"], "Speakers")
+            self.assertEqual(cap._system_start_ts, 123.0)
             cap.stop()
 
     def test_per_app_zero_active_raises(self):
