@@ -11,6 +11,9 @@ license-files = ["LICENSE"]
 # pulling an untested major, while still allowing minor/patch updates. The
 # current locked versions all sit under these caps. (issue #4)
 dependencies = [
+    # Transitive via faster-whisper, capped directly: PyAV 19 dropped the
+    # metadata_errors kwarg faster-whisper's decode_audio still passes. (issue #127)
+    "av>=11,<19",
     "comtypes>=1.2.0",
     "faster-whisper>=1.1.0,<2",
     "numpy>=1.24.0,<3",

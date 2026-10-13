@@ -17,6 +17,12 @@
 
 - Heavy ML deps (numpy, scipy, torch, torchaudio, transformers, pyannote-audio, sentence-transformers, faster-whisper) carry `<next-major` upper bounds in `pyproject.toml` + `requirements.txt`, so a future `uv lock` or plain-pip install can't silently pull an untested major (e.g. numpy 1→2, transformers 4→5).
 - After any dep change: regenerate `uv lock` and confirm it still resolves (`uv lock --check`) + suite green.
+- **Transitive deps can break the pip path while uv stays fine.** `uv.lock` pins every transitive
+  dep, but `requirements.txt` only constrains what it names. PyAV (`av`, pulled in by
+  faster-whisper) 19 dropped the `metadata_errors` kwarg that faster-whisper 1.2.1's
+  `decode_audio` passes, so every plain-pip install failed its first transcription while uv users
+  sat on the locked 17.1.0 (#127). Fix pattern: name the transitive dep directly in both files with
+  a cap (`av>=11,<19`). Verified: 18.1.0 works, 19.0.0 breaks.
 
 ## Taskbar icon = venv-targeted Start Menu shortcut (no exe)
 
@@ -36,7 +42,9 @@
 
 - **test** — installs via `pip install -r requirements.txt` deliberately, not uv, so CI exercises
   what a user without uv actually runs. Then an import smoke (catches import-time breakage like
-  the torch/PyQt6 DLL ordering problem, which no unit test would reach) and the full suite.
+  the torch/PyQt6 DLL ordering problem, which no unit test would reach), an audio decode smoke
+  (a real `faster_whisper.decode_audio` call, since the suite mocks faster-whisper; #127) and the
+  full suite.
 - **uv-lock** — `uv lock --check`, since the torch extras resolve from explicit indexes and the
   lock can drift from `pyproject.toml`.
 

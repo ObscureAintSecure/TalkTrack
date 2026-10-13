@@ -45,6 +45,15 @@ jobs:
           python -c "import app.ui.settings_dialog, app.ui.recordings_list, app.ui.transcript_viewer"
           python -c "import app.utils.config, app.utils.dependency_checker, app.utils.wav_prune"
 
+      # faster-whisper decodes every recording through PyAV. The suite mocks
+      # faster-whisper (torch DLL gotcha) and the import smoke never decodes, so
+      # an incompatible PyAV release only showed up on a user's first
+      # transcription (#127). Decode a short WAV for real.
+      - name: Audio decode smoke
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -c "import numpy as np, soundfile as sf; from faster_whisper import decode_audio; sf.write('decode_smoke.wav', np.zeros(16000, dtype='float32'), 16000); n = len(decode_audio('decode_smoke.wav')); assert abs(n - 16000) <= 160, n; print('decoded', n, 'samples')"
+
       - name: Tests
         env:
           QT_QPA_PLATFORM: offscreen

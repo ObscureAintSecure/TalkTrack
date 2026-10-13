@@ -5193,6 +5193,7 @@ name = "talktrack"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "av" },
     { name = "comtypes" },
     { name = "faster-whisper" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-9-talktrack-cpu' and extra == 'extra-9-talktrack-cuda')" },
@@ -5263,6 +5264,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", marker = "extra == 'all-ai'", specifier = ">=0.40.0" },
     { name = "anthropic", marker = "extra == 'claude'", specifier = ">=0.40.0" },
+    { name = "av", specifier = ">=11,<19" },
     { name = "comtypes", specifier = ">=1.2.0" },
     { name = "faster-whisper", specifier = ">=1.1.0,<2" },
     { name = "google-generativeai", marker = "extra == 'all-ai'", specifier = ">=0.8.0" },

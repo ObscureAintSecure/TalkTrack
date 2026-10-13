@@ -6,6 +6,9 @@ sounddevice>=0.4.6
 PyAudioWPatch>=0.2.12
 numpy>=1.24.0,<3
 faster-whisper>=1.1.0,<2
+# Transitive via faster-whisper, capped directly: PyAV 19 dropped the
+# metadata_errors kwarg faster-whisper's decode_audio still passes. (issue #127)
+av>=11,<19
 pyannote.audio>=4.0.0,<5
 torch>=2.0.0,<3
 torchaudio>=2.0.0,<3
