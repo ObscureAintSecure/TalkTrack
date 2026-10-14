@@ -22,7 +22,7 @@ TalkTrack is a Windows desktop application that records, transcribes, and diariz
 - **GUI:** PyQt6
 - **Audio Capture:** sounddevice + WASAPI, comtypes (Win11 per-process capture)
 - **Audio Session Enumeration:** pycaw (Windows Core Audio API)
-- **Transcription:** faster-whisper (local OpenAI Whisper, no internet needed)
+- **Transcription:** faster-whisper (local OpenAI Whisper, no internet needed); optional OpenVINO GenAI to run Whisper on an Intel GPU
 - **Speaker Diarization:** pyannote.audio 4.0 (requires free HuggingFace token)
 - **Deep Learning:** torch, torchaudio
 - **Audio Processing:** scipy, pydub, soundfile, numpy
@@ -52,6 +52,7 @@ TalkTrack/
       recorder.py                      # State machine, session management
     transcription/
       transcriber.py                   # Whisper worker + dataclasses
+      openvino_whisper.py              # Whisper on an Intel GPU via OpenVINO GenAI (#131)
       diarizer.py                      # Speaker diarization (pyannote)
     ai/
       __init__.py                      # Package init
@@ -101,6 +102,7 @@ TalkTrack/
     test_dual_audio_capture.py        # Per-app mode integration tests
     test_dependency_checker.py        # Dependency checker tests
     test_transcriber.py               # TranscriptSegment/TranscriptResult tests
+    test_openvino_whisper.py          # Intel GPU backend: VAD batching, time mapping, pipeline cache
     test_segment_player.py            # Audio clip playback tests
     test_recording_header.py          # RecordingHeader helper tests
     test_speaker_name_panel.py        # SpeakerNamePanel helper tests
@@ -141,6 +143,7 @@ TalkTrack/
 - Dual audio capture: microphone (your voice) + system/app audio
 - **Dual microphone support:** optionally use 2 mics simultaneously (e.g., desk mic + headset), mixed into one track
 - Auto-transcribes after recording stops using Faster-Whisper
+- **Intel GPU transcription (opt-in, Settings > Transcription > Compute Device):** runs Whisper on the integrated GPU through OpenVINO GenAI (installed on demand), several times faster than the CPU on Core Ultra laptops; falls back to the CPU when unavailable
 - Speaker diarization with two modes:
   - Simple mode (no setup): labels "You" vs "Remote" based on mic vs system channels
   - Full diarization (pyannote.audio): identifies individual speakers
@@ -211,12 +214,12 @@ TalkTrack/
 - Transcription/diarization runs in separate QThread workers
 
 ### System Status Panel
-- `DependencyChecker` runs health checks: mic, WASAPI, GPU/CUDA, Whisper model, HF token, pyannote, FFmpeg, Windows version
+- `DependencyChecker` runs health checks: mic, WASAPI, GPU/CUDA, Intel GPU (only when selected), Whisper model, HF token, pyannote, FFmpeg, Windows version
 - GPU check detects NVIDIA GPU via torch or nvidia-smi, warns if CUDA PyTorch not installed
 - `SystemStatusDialog` shows results with actionable fix suggestions
 - Auto-shows on startup if critical checks fail
 - Accessible via Help > System Status
-- Settings dialog shows inline GPU status when CUDA is selected as compute device
+- Settings dialog shows inline GPU status when CUDA or Intel GPU is selected as compute device
 
 ### Transcript Enhancement Suite
 - `SegmentWidget`: Interactive row per transcript segment — play button, timestamp, speaker label (clickable), editable text, edit indicator
@@ -246,7 +249,7 @@ TalkTrack/
 - Stored at ~/.talktrack/settings.json
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app"), selected_apps, hidden_devices, mic_count (1 or 2)
 - Audio device selection is per-session (not persisted), but capture mode and selected apps are persisted
-- Transcription settings: model size (tiny/base/small/medium/large-v3/large-v3-turbo), language, compute device, min_duration, batch_size (1 = sequential; see transcription-pipeline rules before changing the default)
+- Transcription settings: model size (tiny/base/small/medium/large-v3/large-v3-turbo), language, compute device (cpu/cuda/intel_gpu), min_duration, batch_size (1 = sequential; see transcription-pipeline rules before changing the default)
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/groq/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, auto_record, silence_auto_stop, silence_duration
 

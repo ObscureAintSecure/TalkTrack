@@ -229,5 +229,81 @@ class TestDependencyChecker(unittest.TestCase):
                     sys.modules.pop("torch", None)
 
 
+
+def _config(**values):
+    """Config stub answering config.get("transcription", key) from values."""
+    config = MagicMock()
+    config.get.side_effect = lambda section, key: values.get(key)
+    return config
+
+
+class TestIntelGpuChecks(unittest.TestCase):
+    """device="intel_gpu" transcribes through OpenVINO (#131)."""
+
+    def _whisper_check(self, cached_dirname):
+        from app.utils.dependency_checker import DependencyChecker
+        config = _config(model_size="small", device="intel_gpu")
+        with tempfile.TemporaryDirectory() as tmp:
+            hub = Path(tmp) / ".cache" / "huggingface" / "hub"
+            (hub / cached_dirname).mkdir(parents=True)
+            with patch("app.transcription.openvino_whisper.Path.home", return_value=Path(tmp)):
+                return DependencyChecker(config).check_whisper_model()
+
+    def test_whisper_check_looks_for_the_openvino_build(self):
+        result = self._whisper_check("models--OpenVINO--whisper-small-int8-ov")
+        self.assertTrue(result["passed"])
+        self.assertIn("OpenVINO/whisper-small-int8-ov", result["message"])
+
+    def test_whisper_check_ignores_the_faster_whisper_build(self):
+        result = self._whisper_check("models--Systran--faster-whisper-small")
+        self.assertFalse(result["passed"])
+
+    def _intel_check(self, device, info):
+        from app.utils.dependency_checker import DependencyChecker
+        with patch("app.transcription.openvino_whisper.detect_intel_gpu", return_value=info):
+            return DependencyChecker(_config(device=device)).check_intel_gpu()
+
+    def test_intel_check_skipped_unless_selected(self):
+        self.assertIsNone(self._intel_check("cpu", {"installed": False}))
+
+    def test_intel_gpu_ready(self):
+        result = self._intel_check(
+            "intel_gpu", {"installed": True, "version": "2026.4.1", "gpu_name": "Intel(R) Graphics"})
+        self.assertTrue(result["passed"])
+        self.assertIn("Intel(R) Graphics", result["message"])
+
+    def test_openvino_missing_warns_with_install_command(self):
+        result = self._intel_check("intel_gpu", {"installed": False, "version": "", "gpu_name": ""})
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["level"], "warn")
+        self.assertIn("openvino-genai", result["action"])
+
+    def test_no_intel_gpu_warns(self):
+        result = self._intel_check("intel_gpu", {"installed": True, "version": "2026.4.1", "gpu_name": ""})
+        self.assertFalse(result["passed"])
+        self.assertIn("CPU", result["action"])
+
+    def test_skipped_check_is_left_out_of_run_all_checks(self):
+        from app.utils.dependency_checker import DependencyChecker
+        checker = DependencyChecker()
+        names = [n for n in dir(DependencyChecker) if n.startswith("check_")]
+        stub = {"name": "x", "passed": True, "level": "info", "message": "", "action": None}
+        mocks = {n: MagicMock(return_value=stub) for n in names}
+        mocks["check_intel_gpu"].return_value = None
+        with patch.multiple(DependencyChecker, **mocks):
+            results = checker.run_all_checks()
+        self.assertNotIn(None, results)
+        mocks["check_intel_gpu"].assert_called_once()
+
+    @patch("app.utils.dependency_checker.subprocess.run", side_effect=FileNotFoundError)
+    def test_no_nvidia_gpu_is_fine_when_the_intel_gpu_is_selected(self, mock_run):
+        from app.utils.dependency_checker import DependencyChecker
+        info = {"has_nvidia_gpu": False, "gpu_name": "", "torch_has_cuda": False, "cuda_version": ""}
+        with patch.object(DependencyChecker, "detect_gpu_cuda", return_value=info):
+            result = DependencyChecker(_config(device="intel_gpu")).check_gpu_cuda()
+        self.assertTrue(result["passed"])
+        self.assertIsNone(result["action"])
+
+
 if __name__ == "__main__":
     unittest.main()

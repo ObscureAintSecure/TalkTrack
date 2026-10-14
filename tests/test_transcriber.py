@@ -364,3 +364,89 @@ class TestBatchSizeDefault(unittest.TestCase):
     def test_config_default_is_sequential(self):
         from app.utils.config import DEFAULT_CONFIG
         self.assertEqual(DEFAULT_CONFIG["transcription"]["batch_size"], 1)
+
+
+class TestIntelGpuBackend(unittest.TestCase):
+    """device="intel_gpu" transcribes through OpenVINO and falls back to the CPU."""
+
+    def _run(self, batches=(), get_pipeline_error=None, transcribe_error=None,
+             language=None, on_batch=None, decode_error=None):
+        import numpy as np
+        import app.transcription.openvino_whisper as ovw
+        fw = _FwMocks(segments=[MagicMock(start=0.0, end=1.0, text="cpu", avg_logprob=0.0)])
+        if decode_error:
+            fw.module.decode_audio.side_effect = decode_error
+        else:
+            fw.module.decode_audio.return_value = np.zeros(3 * 16000, dtype=np.float32)
+
+        def fake_transcribe(pipeline, audio, language=None):
+            if transcribe_error:
+                raise transcribe_error
+            for batch in batches:
+                yield batch
+                if on_batch:
+                    on_batch(worker)
+
+        with patch.dict(sys.modules, {"faster_whisper": fw.module}):
+            import app.transcription.transcriber as tr
+            tr._MODEL_CACHE.clear()
+            with patch.object(ovw, "get_pipeline", autospec=True,
+                              side_effect=get_pipeline_error) as get_pipeline, \
+                    patch.object(ovw, "transcribe", autospec=True,
+                                 side_effect=fake_transcribe), \
+                    patch.object(ovw, "release_pipeline", autospec=True) as release:
+                worker = tr.TranscriptionWorker(
+                    "a.wav", model_size="small", language=language, device="intel_gpu",
+                )
+                out = {"finished": [], "progress": [], "error": [], "cancelled": []}
+                worker.finished.connect(out["finished"].append)
+                worker.progress.connect(out["progress"].append)
+                worker.error.connect(out["error"].append)
+                worker.cancelled.connect(lambda: out["cancelled"].append(True))
+                worker.run()
+        out.update(fw=fw, get_pipeline=get_pipeline, release=release)
+        return out
+
+    def _batch(self, segments, language="pt"):
+        from app.transcription.openvino_whisper import BatchResult
+        return BatchResult(segments=segments, language=language)
+
+    def test_segments_come_from_the_gpu(self):
+        out = self._run([self._batch([(1.0, 2.0, "oi")]), self._batch([(5.0, 6.5, "tchau")])])
+        result = out["finished"][0]
+        self.assertEqual([(s.start, s.end, s.text) for s in result.segments],
+                         [(1.0, 2.0, "oi"), (5.0, 6.5, "tchau")])
+        self.assertEqual(result.language, "pt")
+        self.assertEqual(result.duration, 3.0)
+        out["fw"].module.WhisperModel.assert_not_called()
+
+    def test_configured_language_wins_over_detection(self):
+        out = self._run([self._batch([], language="es")], language="pt")
+        self.assertEqual(out["finished"][0].language, "pt")
+
+    def test_unavailable_gpu_falls_back_to_cpu(self):
+        out = self._run(get_pipeline_error=ImportError("No module named 'openvino_genai'"))
+        self.assertEqual([s.text for s in out["finished"][0].segments], ["cpu"])
+        out["fw"].module.WhisperModel.assert_called_once_with(
+            "small", device="cpu", compute_type="int8")
+        self.assertTrue(any("falling back to CPU" in m for m in out["progress"]))
+
+    def test_gpu_failure_mid_run_releases_the_pipeline_and_retries_on_cpu(self):
+        out = self._run(transcribe_error=RuntimeError("ZE_RESULT_ERROR_DEVICE_LOST"))
+        out["release"].assert_called_once_with("small")
+        self.assertEqual([s.text for s in out["finished"][0].segments], ["cpu"])
+        self.assertTrue(any("retrying on CPU" in m for m in out["progress"]))
+
+    def test_cancel_between_batches(self):
+        def cancel(worker):
+            worker.cancel()
+        out = self._run([self._batch([(1.0, 2.0, "a")]), self._batch([(3.0, 4.0, "b")])],
+                        on_batch=cancel)
+        self.assertEqual(out["cancelled"], [True])
+        self.assertEqual(out["finished"], [])
+
+    def test_unreadable_audio_is_an_error_not_a_cpu_retry(self):
+        out = self._run(decode_error=OSError("bad file"))
+        self.assertEqual(out["finished"], [])
+        self.assertTrue(out["error"][0].startswith("Transcription failed"))
+        out["fw"].module.WhisperModel.assert_not_called()

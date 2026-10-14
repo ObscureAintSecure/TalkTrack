@@ -15,6 +15,9 @@ PROVIDER_PACKAGES = {
     "mistral": ("mistralai", "mistralai>=1.0.0", "Mistral AI SDK"),
     "groq": ("groq", "groq>=0.11.0", "Groq SDK"),
     "local": ("llama_cpp", "llama-cpp-python>=0.3.0", "llama.cpp Python bindings"),
+    # Not an AI provider: Settings > Transcription installs it when the Intel
+    # GPU compute device is chosen. Keep in sync with openvino_whisper.PIP_PACKAGE.
+    "openvino": ("openvino_genai", "openvino-genai>=2026.1,<2027", "OpenVINO GenAI"),
 }
 
 

@@ -26,3 +26,6 @@ sentence-transformers>=3.0.0,<6
 # mistralai>=1.0.0           # Mistral
 # groq>=0.11.0               # Groq (groq.com)
 # llama-cpp-python>=0.3.0    # Local models
+
+# Intel GPU transcription — installed automatically when selected in Settings
+# openvino-genai>=2026.1,<2027

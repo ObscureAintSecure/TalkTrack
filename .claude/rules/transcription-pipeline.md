@@ -44,6 +44,7 @@ alone is ~10 GB.
 
 - `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type)`.
 - `diarizer._PIPELINE_CACHE` — pyannote Pipeline keyed `(HF token, resolved device)`.
+- `openvino_whisper._PIPELINE_CACHE` — OpenVINO WhisperPipeline keyed `(model_size, "GPU")`.
 - `provider.get_sentence_transformer()` — shared embed model cache.
 Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VRAM between recordings is intentional. Don't "fix" it.
 
@@ -73,3 +74,34 @@ settings.json, so a higher default silently switches every installed copy to bat
 next launch and trades away cross-chunk `condition_on_previous_text`. The default compute device
 is also `cpu`, where there is least parallel-decode headroom to win back. The worker and the
 config declare the default separately, so both are pinned by tests.
+
+## Intel GPU via OpenVINO (#131)
+
+`transcription.device = "intel_gpu"` routes `TranscriptionWorker` to `_run_openvino`, backed by
+`app/transcription/openvino_whisper.py` (no Qt; OpenVINO and faster-whisper imported inside
+functions). faster-whisper (CTranslate2) has no Intel GPU support, so this is a second backend,
+not a device flag.
+
+- **Any OpenVINO failure falls back to the CPU**, at load or mid-run, and evicts the pipeline
+  (`release_pipeline`). Unlike the diarizer's OOM-only retry, failures here are environmental
+  (missing package, no GPU, driver hang `ZE_RESULT_ERROR_DEVICE_LOST`), and the transcript
+  matters more than surfacing them. Unreadable audio raises instead: the CPU would fail too.
+- **VAD is ours to do.** `WhisperPipeline` has none, and Whisper invents text over silence
+  (20 s of silence came back as "E aí"). `speech_regions` uses faster-whisper's Silero VAD;
+  only speech is decoded and `TimeMap` maps times back to the recording.
+- **Batches of ≤ `MAX_BATCH_SECONDS` (60) of speech.** `generate()` blocks and its streamer is
+  unavailable with timestamps on long audio, so batches are the only progress and cancel
+  points. Meeting speech rarely pauses for the VAD's 2 s (one region ran 264 s, which made
+  Cancel wait ~30 s), so the VAD also gets `max_speech_duration_s = MAX_BATCH_SECONDS` and
+  splits long speech at a short pause. Same total time as 120 s batches.
+- **Language is detected once**, on the first batch, then pinned for the rest, as faster-whisper
+  does. A batch must not flip a pt-BR meeting to Spanish halfway.
+- Models are Intel's `OpenVINO/whisper-<size>-int8-ov` builds in the HF cache
+  (`model_cache_dir`; System Status checks that path when Intel GPU is selected). The first
+  load compiles for the GPU (~40 s); the compiled blob is cached in `~/.talktrack/openvino_cache`.
+- OpenVINO returns no per-segment log-probability, so these segments keep `confidence = 0.0`.
+- Diarization stays on the CPU: `diarizer._resolve_device` maps `intel_gpu` to `cpu`.
+- **No NPU option.** On a Core Ultra 7 265U NPU, large-v3-turbo hangs the device
+  (`ZE_RESULT_ERROR_DEVICE_LOST`, 2/2 runs); only small ran. Revisit with newer drivers.
+- The pip spec lives in `openvino_whisper.PIP_PACKAGE`, `package_installer.PROVIDER_PACKAGES`
+  and the `openvino` extra; `test_openvino_whisper.TestPackageDeclarations` keeps them equal.

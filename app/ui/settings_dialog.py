@@ -218,6 +218,7 @@ class SettingsDialog(QDialog):
         self.device_combo = QComboBox()
         self.device_combo.addItem("CPU", "cpu")
         self.device_combo.addItem("CUDA (NVIDIA GPU)", "cuda")
+        self.device_combo.addItem("Intel GPU (OpenVINO)", "intel_gpu")
         self.device_combo.currentIndexChanged.connect(self._on_device_changed)
         whisper_form.addRow("Compute Device:", self.device_combo)
 
@@ -473,6 +474,16 @@ class SettingsDialog(QDialog):
         self._on_ai_provider_changed(self.ai_provider_combo.currentIndex())
 
     def _save_and_close(self):
+        # Intel GPU transcription needs OpenVINO GenAI, installed on demand.
+        # Asked before any config.set(): set() writes to disk immediately, so
+        # declining has to happen first to leave the settings untouched.
+        if self.device_combo.currentData() == "intel_gpu":
+            if not self._install_provider_package(
+                "openvino", status_label=self.gpu_status_label,
+                purpose="to transcribe on the Intel GPU",
+            ):
+                return
+
         self.config.set("general", "min_recording_length", self.min_recording_spin.value())
         self.config.set("general", "auto_record", self.auto_record_cb.isChecked())
         self.config.set(
@@ -628,6 +639,9 @@ class SettingsDialog(QDialog):
 
     def _on_device_changed(self, index):
         device = self.device_combo.currentData()
+        if device == "intel_gpu":
+            self._show_intel_gpu_status()
+            return
         if device != "cuda":
             self.gpu_status_label.setVisible(False)
             return
@@ -658,6 +672,27 @@ class SettingsDialog(QDialog):
             )
             self.gpu_status_label.setVisible(True)
 
+    def _show_intel_gpu_status(self):
+        from app.transcription.openvino_whisper import detect_intel_gpu
+        info = detect_intel_gpu()
+        if not info["installed"]:
+            self.gpu_status_label.setText(
+                '<span style="color: #fab387;">OpenVINO GenAI is not installed. '
+                'It will be installed when you save (about 90 MB download).</span>'
+            )
+        elif info["gpu_name"]:
+            self.gpu_status_label.setText(
+                f'<span style="color: #a6e3a1;">&#x2705; {info["gpu_name"]} ready '
+                f'(OpenVINO {info["version"]}). The first transcription downloads '
+                f'the model and prepares it for the GPU.</span>'
+            )
+        else:
+            self.gpu_status_label.setText(
+                '<span style="color: #f38ba8;">&#x274c; OpenVINO found no Intel GPU. '
+                'Transcription will fall back to CPU.</span>'
+            )
+        self.gpu_status_label.setVisible(True)
+
     def _check_provider_package(self, provider):
         """Show install status for the selected provider's package."""
         if provider == "none":
@@ -682,8 +717,10 @@ class SettingsDialog(QDialog):
             )
         self.ai_package_label.setVisible(True)
 
-    def _install_provider_package(self, provider):
+    def _install_provider_package(self, provider, status_label=None, purpose="for this provider"):
         """Install the required package for a provider. Returns True if ready."""
+        if status_label is None:
+            status_label = self.ai_package_label
         from app.utils.package_installer import is_package_installed, get_package_info, install_package
         if is_package_installed(provider):
             return True
@@ -696,7 +733,7 @@ class SettingsDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "Install Required Package",
-            f"The {display_name} package is required for this provider.\n\n"
+            f"The {display_name} package is required {purpose}.\n\n"
             f"Package: {pip_package}\n\n"
             f"Install it now?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -704,15 +741,15 @@ class SettingsDialog(QDialog):
         if reply != QMessageBox.StandardButton.Yes:
             return False
 
-        self.ai_package_label.setText(
+        status_label.setText(
             f'<span style="color: #89b4fa;">Installing {display_name}...</span>'
         )
-        self.ai_package_label.setVisible(True)
+        status_label.setVisible(True)
         QApplication.processEvents()
 
         success, output = install_package(pip_package)
         if success:
-            self.ai_package_label.setText(
+            status_label.setText(
                 f'<span style="color: #a6e3a1;">{display_name} installed successfully.</span>'
             )
             return True
@@ -721,7 +758,7 @@ class SettingsDialog(QDialog):
                 self, "Installation Failed",
                 f"Failed to install {pip_package}:\n\n{output[:500]}"
             )
-            self.ai_package_label.setText(
+            status_label.setText(
                 f'<span style="color: #f38ba8;">Installation failed.</span>'
             )
             return False
