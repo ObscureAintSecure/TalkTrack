@@ -40,6 +40,22 @@ Why this exists: `transcriber._MODEL_CACHE` and `diarizer._PIPELINE_CACHE` are b
 design, so a CUDA run pins the Whisper model and the pyannote pipeline in VRAM at once. `large-v3`
 alone is ~10 GB.
 
+## Speaker embeddings: one network pass per chunk (#133)
+
+`_get_pipeline` swaps the pipeline's `get_embeddings` for `chunk_embeddings.get_embeddings`.
+pyannote runs the WeSpeaker ResNet once per (chunk, local speaker): three passes over the same
+10 s of audio, although only the statistics pooling depends on the speaker. The per-chunk version
+passes `(batch, speakers, frames)` weights, which the model pools in one pass. That step was 96%
+of diarization time, and the change made it ~3x faster on a CPU.
+
+- **The output must stay pyannote's.** Overlap-free mask selection, NaN handling, batch size and
+  the progress hook mirror `SpeakerDiarization.get_embeddings`. Inactive speakers are still
+  pooled with zero weights rather than skipped, since clustering sees their (NaN) rows.
+  `test_chunk_embeddings` restates pyannote's loop and compares; re-check it against
+  pyannote's source when upgrading pyannote.audio.
+- Only pyannote's own WeSpeaker wrapper pools per speaker. `install` leaves other embedding
+  backends (SpeechBrain, NeMo, ONNX) on pyannote's loop, and training keeps pyannote's path.
+
 ## Model caches — resident by design
 
 - `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type)`.

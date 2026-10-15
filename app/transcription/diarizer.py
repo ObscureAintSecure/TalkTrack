@@ -79,6 +79,9 @@ def _get_pipeline(hf_token, device="cpu"):
             "pyannote/speaker-diarization-community-1",
             token=hf_token,
         )
+        from app.transcription import chunk_embeddings
+        if not chunk_embeddings.install(pipeline):
+            logger.info("Speaker embeddings: per-chunk pass unavailable, using pyannote's loop")
         if resolved == "cuda":
             import torch
             try:
