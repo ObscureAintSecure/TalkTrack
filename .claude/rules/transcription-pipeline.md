@@ -21,6 +21,22 @@ Every pipeline worker (`TranscriptionWorker`, `DiarizationWorker`, `SimpleDiariz
 
 Diarization (full or simple) failing must still render/persist the successful transcript (`worker.transcript_result`). A silent drop here was the original #14 bug.
 
+## The transcript shows while pyannote runs (#134)
+
+`_start_diarization` calls `_show_transcript_preview` once the worker has started. The preview is
+displayed and saved (or written to its own directory when the session is not displayed). Pyannote
+takes about as long as the recording on a CPU, and the text used to wait for it.
+
+- **The preview shares segment objects with the worker.** `DiarizationWorker` only ever sets
+  `seg.speaker`, so text edits made while it runs are already in the final result. Keep it that
+  way: a worker that rebuilt or copied segments would silently drop those edits.
+- A preview reopened from disk (the user switched recordings and back) is a different object.
+  `_finish_diarized_transcript` copies its edits over (`_carry_over_edits`, matched by position
+  and timestamps) before `_display_final_transcript`, on both the finished and error paths.
+- Summaries, chat context, the tray notification and `_process_pending_transcriptions` stay in
+  `_display_final_transcript`. The preview must not touch them: auto-summary needs the speakers,
+  and the queue is still busy.
+
 ## GPU diarization falls back to CPU on OOM (#74)
 
 `_get_pipeline(hf_token, device)` returns **`(pipeline, device_actually_used)`** — callers must

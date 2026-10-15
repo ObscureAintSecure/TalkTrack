@@ -118,6 +118,7 @@ TalkTrack/
     test_recordings_salvage.py         # Crash-orphan salvage tests
     test_diarizer.py                   # Diarization device selection + CUDA OOM fallback tests
     test_system_monitor_start.py       # Test Mic monitor construction regression (#79)
+    test_transcript_preview.py         # Transcript shown while diarization runs (#134)
   resources/
     style.qss                          # Dark theme stylesheet (Catppuccin Mocha)
     talktrack.ico                      # App icon (multi-size: 16-256px)

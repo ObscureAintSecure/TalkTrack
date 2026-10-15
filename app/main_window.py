@@ -886,15 +886,53 @@ class MainWindow(QMainWindow):
         self._diarization_worker.start()
 
         self.transcript_viewer.show_progress("Running speaker diarization...")
+        self._show_transcript_preview(transcript_result, session)
+
+    def _show_transcript_preview(self, result, session):
+        """Show and save the transcript while its speakers are being identified (#134).
+
+        Diarization takes about as long as the recording itself on a CPU, so the
+        text would otherwise wait for it. The preview shares its segment objects
+        with the diarization worker, which only ever sets .speaker, so edits made
+        meanwhile are in the final transcript. Summaries, chat and the job queue
+        still wait for the final result.
+        """
+        if not self._is_current_session(session):
+            self._write_transcript_for_session(result, session)
+            return
+        self.transcript_viewer.display_transcript(result)
+        self._save_transcript()
+
+    @staticmethod
+    def _carry_over_edits(shown, result):
+        """Copy text edits from `shown` onto `result`, the same transcript.
+
+        `shown` is a preview the user reopened while diarization ran: reloaded
+        from transcript.json, so not the worker's objects. Segments are matched
+        by position and time; anything else means it is not the same transcript.
+        """
+        if shown is None or shown is result or len(shown.segments) != len(result.segments):
+            return
+        for old, new in zip(shown.segments, result.segments):
+            if (old.start, old.end) != (new.start, new.end):
+                return
+        for old, new in zip(shown.segments, result.segments):
+            if old.original_text:
+                new.text, new.original_text = old.text, old.original_text
+
+    def _finish_diarized_transcript(self, result, session):
+        if self._is_current_session(session):
+            self._carry_over_edits(self.transcript_viewer._transcript, result)
+        self._display_final_transcript(result, session)
 
     def _on_diarization_finished(self, result):
         session = getattr(self._diarization_worker, "session", None)
-        self._display_final_transcript(result, session)
+        self._finish_diarized_transcript(result, session)
 
     def _on_diarization_error(self, error_msg):
         # Transcription itself succeeded — render it without speaker labels.
         if self._diarization_worker is not None:
-            self._display_final_transcript(
+            self._finish_diarized_transcript(
                 self._diarization_worker.transcript_result,
                 getattr(self._diarization_worker, "session", None),
             )
@@ -1061,6 +1099,14 @@ class MainWindow(QMainWindow):
                 self._transcript = result
             except Exception as e:
                 print(f"[MainWindow] Failed to load transcript: {e}")
+
+        # Reopened while its speakers are still being identified: the transcript
+        # above is the preview, so say that names are still coming.
+        worker = self._diarization_worker
+        if (worker is not None and worker.isRunning()
+                and getattr(worker, "session", None) is not None
+                and self._is_current_session(worker.session)):
+            self.transcript_viewer.show_progress("Running speaker diarization...")
 
         # Update recording header
         self.recording_header.set_recording(
