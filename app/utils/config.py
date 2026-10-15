@@ -36,6 +36,9 @@ DEFAULT_CONFIG = {
         "hf_token": "",
         "min_speakers": None,
         "max_speakers": None,
+        # Recognise named speakers across recordings by voice (#128). Off by
+        # default: it stores voice embeddings (biometric data) on disk.
+        "voice_profiles": False,
     },
     "ai": {
         "provider": "none",

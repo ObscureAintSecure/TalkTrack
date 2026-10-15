@@ -24,6 +24,7 @@ from app.recording.mic_monitor import MicMonitor
 from app.recording.recorder import Recorder, RecordingState
 from app.transcription.transcriber import TranscriptionWorker, TranscriptResult
 from app.transcription.diarizer import DiarizationWorker, SimpleDiarizeWorker
+from app.transcription import voice_profiles
 from app.ui.recording_controls import RecordingControls
 from app.ui.meters_panel import MetersPanel
 from app.ui.source_selector import SourceSelector
@@ -888,8 +889,54 @@ class MainWindow(QMainWindow):
         self.transcript_viewer.show_progress("Running speaker diarization...")
 
     def _on_diarization_finished(self, result):
-        session = getattr(self._diarization_worker, "session", None)
+        worker = self._diarization_worker
+        session = getattr(worker, "session", None)
+        recognized = self._apply_voice_profiles(
+            session, getattr(worker, "speaker_embeddings", None)
+        )
         self._display_final_transcript(result, session)
+        if recognized and self._is_current_session(session):
+            self.status_label.setText(
+                "Transcription complete. Recognized by voice: "
+                f"{', '.join(recognized)} (check the Speakers panel)."
+            )
+
+    def _apply_voice_profiles(self, session, embeddings):
+        """Save the recording's speaker centroids and auto-fill known voices.
+
+        Writes speaker_names.json before the transcript is displayed, so both
+        the displayed and the not-displayed paths pick the names up. Returns the
+        recognized names. Never raises: voice matching must not cost the user
+        a finished transcript.
+        """
+        if (not embeddings or not session or not session.get("directory")
+                or not self.config.get("diarization", "voice_profiles")):
+            return []
+        directory = Path(session["directory"])
+        try:
+            names = self._read_speaker_names(directory)
+            filled, matches = voice_profiles.apply_to_recording(
+                directory, embeddings, names, voice_profiles.VoiceProfileStore()
+            )
+            if filled != names:
+                atomic_write_json(directory / "speaker_names.json", filled,
+                                  indent=2, ensure_ascii=False)
+            return [name for name, _score in matches.values()]
+        except Exception:
+            logger.warning("Voice profile matching failed", exc_info=True)
+            return []
+
+    @staticmethod
+    def _read_speaker_names(directory):
+        names_path = Path(directory) / "speaker_names.json"
+        if not names_path.exists():
+            return {}
+        try:
+            with open(names_path, "r", encoding="utf-8") as f:
+                names = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return names if isinstance(names, dict) else {}
 
     def _on_diarization_error(self, error_msg):
         # Transcription itself succeeded — render it without speaker labels.
@@ -955,6 +1002,7 @@ class MainWindow(QMainWindow):
 
         # Load speaker names if available
         speaker_names = {}
+        voice_matches = {}
         if self._current_session:
             names_path = Path(self._current_session["directory"]) / "speaker_names.json"
             if names_path.exists():
@@ -963,8 +1011,11 @@ class MainWindow(QMainWindow):
                         speaker_names = json.load(f)
                 except (json.JSONDecodeError, OSError):
                     pass
+            voice_matches = voice_profiles.load_voice_matches(self._current_session["directory"])
 
-        self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
+        self.transcript_viewer.display_transcript(
+            result, speaker_names=speaker_names, voice_matches=voice_matches
+        )
         self.status_label.setText("Transcription complete.")
         if self._is_hidden_to_tray():
             self._flag_success_notification()
@@ -1057,7 +1108,10 @@ class MainWindow(QMainWindow):
                     language=data.get("language", ""),
                     duration=data.get("duration", 0),
                 )
-                self.transcript_viewer.display_transcript(result, speaker_names=speaker_names)
+                self.transcript_viewer.display_transcript(
+                    result, speaker_names=speaker_names,
+                    voice_matches=voice_profiles.load_voice_matches(metadata["directory"]),
+                )
                 self._transcript = result
             except Exception as e:
                 print(f"[MainWindow] Failed to load transcript: {e}")
@@ -1157,6 +1211,15 @@ class MainWindow(QMainWindow):
 
         # Also re-save transcript with updated names
         self._save_transcript()
+
+        if self.config.get("diarization", "voice_profiles"):
+            try:
+                voice_profiles.train_from_names(
+                    self._current_session["directory"], names,
+                    voice_profiles.VoiceProfileStore(),
+                )
+            except Exception:
+                logger.warning("Voice profile update failed", exc_info=True)
 
     def _on_recording_renamed(self, new_name):
         """Handle recording rename from RecordingHeader."""

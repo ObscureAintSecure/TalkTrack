@@ -27,6 +27,23 @@ def _extract_speakers(segments):
     return sorted(speakers)
 
 
+def _voice_match_hint(speaker_id, name, voice_matches):
+    """(text, tooltip) for a name auto-filled from voice profiles, or None.
+
+    Returns None once the user has changed the name: from then on it is
+    theirs, not a suggestion (#128).
+    """
+    match = (voice_matches or {}).get(speaker_id)
+    if not match or not name or match.get("name") != name:
+        return None
+    tooltip = "Filled in automatically because this voice matches a saved voice profile."
+    score = match.get("score")
+    if isinstance(score, (int, float)):
+        tooltip += f" Similarity {score:.2f}."
+    tooltip += " Edit the name if it is wrong; corrections update the profiles."
+    return "recognized by voice", tooltip
+
+
 class SpeakerNamePanel(QWidget):
     """Collapsible panel for mapping speaker IDs to friendly names.
 
@@ -41,6 +58,8 @@ class SpeakerNamePanel(QWidget):
         self._speaker_ids = []
         self._name_edits = {}  # speaker_id -> QLineEdit
         self._speaker_names = {}  # speaker_id -> name str
+        self._voice_matches = {}  # speaker_id -> {"name", "score"} auto-filled by voice
+        self._match_hints = {}  # speaker_id -> QLabel
         self._collapsed = config.get("ui", "speakers_collapsed") if config else False
         self._setup_ui()
         self.hide()  # hidden until speakers exist
@@ -71,15 +90,18 @@ class SpeakerNamePanel(QWidget):
         self._rows_layout.setSpacing(4)
         self._main_layout.addWidget(self._rows_container)
 
-    def set_speakers(self, segments, speaker_names=None):
+    def set_speakers(self, segments, speaker_names=None, voice_matches=None):
         """Populate panel from transcript segments and optional existing names.
 
         Args:
             segments: list of TranscriptSegment
             speaker_names: dict of {speaker_id: name} or None
+            voice_matches: dict of {speaker_id: {"name", "score"}} auto-filled
+                from voice profiles, or None
         """
         self._speaker_ids = _extract_speakers(segments)
         self._speaker_names = dict(speaker_names) if speaker_names else {}
+        self._voice_matches = dict(voice_matches) if voice_matches else {}
 
         if not self._speaker_ids:
             self.hide()
@@ -92,6 +114,7 @@ class SpeakerNamePanel(QWidget):
 
         # Clear existing rows
         self._name_edits.clear()
+        self._match_hints.clear()
         while self._rows_layout.count():
             item = self._rows_layout.takeAt(0)
             if item.widget():
@@ -132,7 +155,16 @@ class SpeakerNamePanel(QWidget):
             name_edit.textChanged.connect(self._on_name_changed)
             row_layout.addWidget(name_edit)
 
+            match_hint = QLabel()
+            match_hint.setStyleSheet("color: #a6e3a1; font-size: 11px;")
+            row_layout.addWidget(match_hint)
+
             self._name_edits[speaker_id] = name_edit
+            self._match_hints[speaker_id] = match_hint
+            self._update_match_hint(speaker_id)
+            name_edit.textChanged.connect(
+                lambda _text, sid=speaker_id: self._update_match_hint(sid)
+            )
             self._rows_layout.addWidget(row_widget)
 
     def get_speaker_names(self):
@@ -155,6 +187,16 @@ class SpeakerNamePanel(QWidget):
     def _on_name_changed(self, text):
         """Emit names_changed whenever any name field changes."""
         self.names_changed.emit(self.get_speaker_names())
+
+    def _update_match_hint(self, speaker_id):
+        hint = self._match_hints.get(speaker_id)
+        edit = self._name_edits.get(speaker_id)
+        if hint is None or edit is None:
+            return
+        result = _voice_match_hint(speaker_id, edit.text().strip(), self._voice_matches)
+        hint.setText(result[0] if result else "")
+        hint.setToolTip(result[1] if result else "")
+        hint.setVisible(result is not None)
 
     def _toggle_collapsed(self):
         self._collapsed = not self._collapsed

@@ -216,8 +216,12 @@ class TranscriptViewer(QWidget):
     def _on_cancel_clicked(self):
         self.cancel_requested.emit()
 
-    def display_transcript(self, transcript, speaker_names=None):
-        """Render transcript with interactive segment widgets."""
+    def display_transcript(self, transcript, speaker_names=None, voice_matches=None):
+        """Render transcript with interactive segment widgets.
+
+        voice_matches: {speaker_id: {"name", "score"}} names auto-filled from
+        voice profiles, flagged in the speaker panel until edited (#128).
+        """
         self._transcript = transcript
         if speaker_names is not None:
             self._speaker_names = dict(speaker_names)
@@ -266,7 +270,9 @@ class TranscriptViewer(QWidget):
         self._segments_layout.addStretch()
 
         # Update speaker panel
-        self.speaker_panel.set_speakers(transcript.segments, self._speaker_names)
+        self.speaker_panel.set_speakers(
+            transcript.segments, self._speaker_names, voice_matches=voice_matches
+        )
 
         # Enable export and playback buttons
         self.copy_all_btn.setEnabled(True)

@@ -53,6 +53,7 @@ TalkTrack/
     transcription/
       transcriber.py                   # Whisper worker + dataclasses
       diarizer.py                      # Speaker diarization (pyannote)
+      voice_profiles.py                # Recognise named speakers across recordings (#128)
     ai/
       __init__.py                      # Package init
       provider.py                      # AIProvider base class
@@ -86,6 +87,7 @@ TalkTrack/
       action_items_panel.py            # AI action items display
       chat_panel.py                    # Chat with transcript panel
       about_dialog.py                  # About dialog with donation link
+      voice_profiles_dialog.py         # List/delete saved voice profiles
     utils/
       audio_devices.py                # Device enumeration (sounddevice)
       audio_session_monitor.py        # Per-app audio session enumeration (pycaw)
@@ -117,6 +119,8 @@ TalkTrack/
     test_recorder.py                   # MP3 conversion + WAV replacement tests
     test_recordings_salvage.py         # Crash-orphan salvage tests
     test_diarizer.py                   # Diarization device selection + CUDA OOM fallback tests
+    test_voice_profiles.py             # Voice profile matching, training and store tests
+    test_voice_profiles_integration.py # Voice profiles wired into worker, panel, MainWindow
     test_system_monitor_start.py       # Test Mic monitor construction regression (#79)
   resources/
     style.qss                          # Dark theme stylesheet (Catppuccin Mocha)
@@ -147,6 +151,7 @@ TalkTrack/
 - **System Status Panel:** startup dependency health check (Help > System Status)
 - **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
 - **Speaker naming:** assign friendly names to diarized speakers, saved per recording
+- **Voice profiles (opt-in, Settings > Transcription):** names you give diarized speakers build local voice profiles; later recordings auto-fill known voices, flagged "recognized by voice" in the Speakers panel until edited. Manage/delete profiles from Settings
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names
@@ -247,6 +252,8 @@ TalkTrack/
 - Audio settings: sample_rate, channels, capture_mode ("legacy" or "per_app"), selected_apps, hidden_devices, mic_count (1 or 2)
 - Audio device selection is per-session (not persisted), but capture mode and selected apps are persisted
 - Transcription settings: model size (tiny/base/small/medium/large-v3/large-v3-turbo), language, compute device, min_duration, batch_size (1 = sequential; see transcription-pipeline rules before changing the default)
+- Diarization settings: enabled, hf_token, min/max_speakers, voice_profiles (default False: voice embeddings are biometric data)
+- Voice profiles live in ~/.talktrack/voice_profiles.json (contributions per recording + speaker, see transcription-pipeline rules)
 - AI settings: provider (none/claude/openai/grok/gemini/mistral/groq/local), provider_settings (per-provider api_key/model), auto_summarize
 - General settings: min_recording_length, auto_record, silence_auto_stop, silence_duration
 
@@ -255,6 +262,8 @@ TalkTrack/
 - action_items.json: Extracted action items with assignees
 - chat_history.json: Chat conversation history
 - embeddings.npz: Cached segment embeddings for semantic search (auto-invalidated on edit)
+- speaker_embeddings.json: pyannote centroid per diarized speaker (only with voice profiles on)
+- voice_matches.json: names auto-filled from voice profiles, with their similarity
 
 ## Setup Instructions
 

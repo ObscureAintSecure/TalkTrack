@@ -125,6 +125,9 @@ class DiarizationWorker(QThread):
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
         self.device = device
+        # {label: centroid vector}, set on success; read by MainWindow for
+        # voice profiles (#128).
+        self.speaker_embeddings = {}
 
     def run(self):
         try:
@@ -185,6 +188,14 @@ class DiarizationWorker(QThread):
                 diarization = result.speaker_diarization
             else:
                 diarization = result  # fallback for older versions
+
+            # Best-effort: missing centroids only disable voice matching.
+            try:
+                from app.transcription.voice_profiles import speaker_embeddings_by_label
+                self.speaker_embeddings = speaker_embeddings_by_label(result, diarization)
+            except Exception:
+                logger.warning("Could not read speaker embeddings", exc_info=True)
+                self.speaker_embeddings = {}
 
             # Extract speaker segments
             speaker_segments = []

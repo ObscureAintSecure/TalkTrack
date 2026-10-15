@@ -290,6 +290,19 @@ class SettingsDialog(QDialog):
         self.max_speakers_spin.setSpecialValueText("Auto")
         diarization_form.addRow("Max Speakers:", self.max_speakers_spin)
 
+        self.voice_profiles_cb = QCheckBox("Recognize returning speakers by voice")
+        self.voice_profiles_cb.setToolTip(
+            "When you name a speaker, TalkTrack saves a voice profile for that name "
+            "and fills it in automatically on later recordings.\n"
+            "Voice profiles are biometric data. They are stored only on this computer "
+            "(~/.talktrack/voice_profiles.json)."
+        )
+        diarization_form.addRow(self.voice_profiles_cb)
+
+        self.manage_voice_profiles_btn = QPushButton("Manage Voice Profiles...")
+        self.manage_voice_profiles_btn.clicked.connect(self._open_voice_profiles)
+        diarization_form.addRow("", self.manage_voice_profiles_btn)
+
         transcription_layout.addWidget(diarization_group)
         transcription_layout.addStretch()
 
@@ -445,6 +458,7 @@ class SettingsDialog(QDialog):
         # Diarization
         self.diarization_enabled.setChecked(self.config.get("diarization", "enabled"))
         self.hf_token_edit.setText(self.config.get("diarization", "hf_token") or "")
+        self.voice_profiles_cb.setChecked(bool(self.config.get("diarization", "voice_profiles")))
 
         min_spk = self.config.get("diarization", "min_speakers")
         self.min_speakers_spin.setValue(min_spk if min_spk else 0)
@@ -510,6 +524,7 @@ class SettingsDialog(QDialog):
 
         max_spk = self.max_speakers_spin.value()
         self.config.set("diarization", "max_speakers", max_spk if max_spk > 0 else None)
+        self.config.set("diarization", "voice_profiles", self.voice_profiles_cb.isChecked())
 
         # AI — install package if needed before saving
         provider_type = self.ai_provider_combo.currentData()
@@ -532,6 +547,10 @@ class SettingsDialog(QDialog):
 
         self.config.save()
         self.accept()
+
+    def _open_voice_profiles(self):
+        from app.ui.voice_profiles_dialog import VoiceProfilesDialog
+        VoiceProfilesDialog(parent=self).exec()
 
     def _open_setup_wizard(self):
         from app.ui.diarization_setup import DiarizationSetupWizard
