@@ -12,6 +12,9 @@
 - Bare `uv sync` (no extra) still resolves CPU torch transitively, so CPU-only users are unaffected and `start.bat` needs no extra.
 - GPU: `uv sync --extra cuda` (or `pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126`). cu126 matches the suggestion in `dependency_checker.py`.
 - Verify resolutions with `uv export --extra cpu` / `--extra cuda` (CPU build = `+cpu`, GPU = `+cu126`).
+- Intel GPU transcription needs `openvino-genai`, an optional `openvino` extra (like the AI SDKs, only commented in
+  `requirements.txt`). Settings installs it on demand when the Intel GPU device is chosen. It works
+  alongside either torch build: OpenVINO does not use torch.
 
 ## Dependency version caps
 

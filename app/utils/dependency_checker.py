@@ -32,10 +32,11 @@ class DependencyChecker:
 
     def run_all_checks(self):
         """Run all dependency checks and return list of results."""
-        return [
+        results = [
             self.check_microphone(),
             self.check_wasapi(),
             self.check_gpu_cuda(),
+            self.check_intel_gpu(),
             self.check_ffmpeg(),
             self.check_whisper_model(),
             self.check_hf_token(),
@@ -43,6 +44,8 @@ class DependencyChecker:
             self.check_package_metadata(),
             self.check_windows_version(),
         ]
+        # A check returns None when it does not apply to this configuration.
+        return [r for r in results if r is not None]
 
     def check_package_metadata(self, packages=("numpy", "torch", "faster-whisper")):
         """Detect packages whose installed metadata is damaged or missing.
@@ -252,6 +255,15 @@ class DependencyChecker:
                 "message": f"{gpu} found but CUDA PyTorch not installed.",
                 "action": action,
             }
+        elif configured_device == "intel_gpu":
+            # Transcription runs on the Intel GPU; see check_intel_gpu.
+            return {
+                "name": "GPU Acceleration",
+                "passed": True,
+                "level": "info",
+                "message": "No NVIDIA GPU detected (not needed for the Intel GPU).",
+                "action": None,
+            }
         else:
             return {
                 "name": "GPU Acceleration",
@@ -260,6 +272,51 @@ class DependencyChecker:
                 "message": "No NVIDIA GPU detected. Using CPU for transcription.",
                 "action": None if configured_device == "cpu" else "Set Compute Device to CPU in Settings.",
             }
+
+    def check_intel_gpu(self):
+        """Check OpenVINO and the Intel GPU, when that is the compute device.
+
+        Returns None for any other device, so the row only shows for users
+        who chose it.
+        """
+        if self._configured("device", "cpu") != "intel_gpu":
+            return None
+        from app.transcription import openvino_whisper
+        info = openvino_whisper.detect_intel_gpu()
+        if not info["installed"]:
+            return {
+                "name": "Intel GPU (OpenVINO)",
+                "passed": False,
+                "level": "warn",
+                "message": "OpenVINO GenAI is not installed. Transcription uses the CPU.",
+                "action": "Save Settings with Intel GPU selected to install it, or run:\n"
+                          f'pip install "{openvino_whisper.PIP_PACKAGE}"',
+            }
+        if not info["gpu_name"]:
+            return {
+                "name": "Intel GPU (OpenVINO)",
+                "passed": False,
+                "level": "warn",
+                "message": f"OpenVINO {info['version']} found no Intel GPU.",
+                "action": "Transcription will fall back to CPU. Update the Intel graphics "
+                          "driver, or set Compute Device to CPU in Settings.",
+            }
+        return {
+            "name": "Intel GPU (OpenVINO)",
+            "passed": True,
+            "level": "info",
+            "message": f"{info['gpu_name']} ready (OpenVINO {info['version']}).",
+            "action": None,
+        }
+
+    def _configured(self, key, default):
+        """A transcription setting, or default without a usable config."""
+        if self.config:
+            try:
+                return self.config.get("transcription", key)
+            except (KeyError, TypeError):
+                pass
+        return default
 
     def check_whisper_model(self):
         """Check if the configured Whisper model is cached locally."""
@@ -271,12 +328,21 @@ class DependencyChecker:
                 pass
 
         cache_dir = whisper_cache_dir(model_size)
+        label = f"faster-whisper-{model_size}"
+        if self._configured("device", "cpu") == "intel_gpu":
+            # The Intel GPU runs a separate OpenVINO build of the same model.
+            from app.transcription import openvino_whisper
+            try:
+                cache_dir = openvino_whisper.model_cache_dir(model_size)
+                label = openvino_whisper.model_repo(model_size)
+            except ValueError:
+                pass
         if cache_dir.exists():
             return {
                 "name": "Whisper Model",
                 "passed": True,
                 "level": "critical",
-                "message": f"Model 'faster-whisper-{model_size}' is cached.",
+                "message": f"Model '{label}' is cached.",
                 "action": None,
             }
         else:
@@ -284,7 +350,7 @@ class DependencyChecker:
                 "name": "Whisper Model",
                 "passed": False,
                 "level": "critical",
-                "message": f"Model 'faster-whisper-{model_size}' not found in cache.",
+                "message": f"Model '{label}' not found in cache.",
                 "action": "The model will be downloaded automatically on first transcription.",
             }
 

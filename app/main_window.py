@@ -24,6 +24,7 @@ from app.recording.mic_monitor import MicMonitor
 from app.recording.recorder import Recorder, RecordingState
 from app.transcription.transcriber import TranscriptionWorker, TranscriptResult
 from app.transcription.diarizer import DiarizationWorker, SimpleDiarizeWorker
+from app.transcription.live_transcriber import LiveTranscriptionWorker
 from app.ui.recording_controls import RecordingControls
 from app.ui.meters_panel import MetersPanel
 from app.ui.source_selector import SourceSelector
@@ -54,6 +55,9 @@ class MainWindow(QMainWindow):
         self._simple_diarize_worker = None
         self._summarize_worker = None
         self._pending_transcriptions = []
+        # LiveTranscriptionWorker per recording directory, from recording start
+        # until its transcription job takes it (#139).
+        self._live_workers = {}
         self._closing = False
         self._silent_capture_warned = False
         self._mic_muted = False
@@ -407,6 +411,50 @@ class MainWindow(QMainWindow):
         self.notes_panel.set_recording_start(datetime.now())
         self.chat_panel.clear_chat()
         self.status_label.setText("Recording...")
+        self._start_live_transcription()
+
+    def _start_live_transcription(self):
+        """Transcribe the new recording while it records, when enabled (#139)."""
+        if not self.config.get("transcription", "live"):
+            return
+        if self.config.get("transcription", "device") != "intel_gpu":
+            return
+        if not self.config.get("general", "auto_transcribe"):
+            return   # nothing would take the result after Stop
+        capture = getattr(self.recorder, "_capture", None)
+        session = getattr(self.recorder, "_current_session", None)
+        if self.recorder.state != RecordingState.RECORDING or capture is None or not session:
+            return
+        # The capture's writers name the track files and exist from the start,
+        # so the worker mixes exactly the tracks Stop will mix.
+        writers = getattr(capture, "_writers", None) or {}
+        mic_paths = [writers[k].path for k in ("mic", "mic2") if k in writers]
+        system = writers.get("system")
+        if not mic_paths and system is None:
+            return
+        worker = LiveTranscriptionWorker(
+            mic_paths, system.path if system is not None else None,
+            model_size=self.config.get("transcription", "model_size"),
+            language=self.config.get("transcription", "language"),
+        )
+        worker.session = session
+        self._live_workers[session["directory"]] = worker
+        worker.start()
+
+    def _take_live_worker(self, session):
+        """The live worker that can finish this session's transcript, or None."""
+        if not session:
+            return None
+        worker = self._live_workers.pop(session.get("directory"), None)
+        if worker is None:
+            return None
+        if not worker.usable or not worker.isRunning():
+            if worker.failed:
+                logger.info("Live transcription unusable (%s); transcribing after Stop",
+                            worker.failed)
+            worker.cancel()
+            return None
+        return worker
 
     def _toggle_pause(self):
         if self.recorder.state == RecordingState.RECORDING:
@@ -618,8 +666,17 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             f"Recording discarded ({duration:.0f}s < {min_len}s minimum)"
         )
+        session = getattr(self.recorder, "_current_session", None) or {}
+        worker = self._live_workers.pop(session.get("directory"), None)
+        if worker is not None:
+            worker.cancel()
 
     def _on_state_changed(self, state):
+        if state == RecordingState.STOPPING:
+            # Stop closes and mixes the track files right after this signal;
+            # live workers must be done reading them first (#139).
+            for worker in self._live_workers.values():
+                worker.stop_reading()
         self.recording_controls.set_state(state)
         self.source_selector.set_enabled(state == RecordingState.IDLE)
         if hasattr(self, "tray") and self.tray.is_supported():
@@ -736,11 +793,16 @@ class MainWindow(QMainWindow):
                 )
         elif audio_for_transcript and duration >= min_duration:
             self._start_transcription(audio_for_transcript)
+            return
         elif audio_for_transcript:
             self.status_label.setText(
                 f"Recording too short ({duration:.0f}s < {min_duration}s) — "
                 "skipping auto-transcription. Use Transcribe button to transcribe manually."
             )
+        # Not transcribed now, so nothing will take a live transcript (#139).
+        live = self._live_workers.pop(session.get("directory"), None)
+        if live is not None:
+            live.cancel()
 
     def _transcription_busy(self):
         return (
@@ -764,6 +826,24 @@ class MainWindow(QMainWindow):
                 )
             return
 
+        live = self._take_live_worker(session)
+        if live is not None and live.finish(audio_path):
+            # Transcribed while recording (#139): only the end is left. The
+            # live worker takes the job slot and emits what TranscriptionWorker would.
+            self._transcription_worker = live
+            live.audio_path = audio_path
+            live.progress.connect(self._on_transcription_progress)
+            live.finished.connect(self._on_transcription_finished)
+            live.error.connect(self._on_transcription_error)
+            live.cancelled.connect(self._on_transcription_cancelled)
+            live.fallback.connect(self._on_live_transcription_fallback)
+            self.transcript_viewer.show_progress("Finishing the live transcript...")
+            self.status_label.setText("Transcribing...")
+            return
+
+        self._start_transcription_worker(audio_path, session)
+
+    def _start_transcription_worker(self, audio_path, session):
         model_size = self.config.get("transcription", "model_size")
         language = self.config.get("transcription", "language")
         device = self.config.get("transcription", "device")
@@ -785,6 +865,19 @@ class MainWindow(QMainWindow):
 
         self.transcript_viewer.show_progress("Starting transcription...")
         self.status_label.setText("Transcribing...")
+
+    def _on_live_transcription_fallback(self, reason):
+        """Live transcription could not finish: transcribe the recording normally.
+
+        The job slot is still this recording's, so the worker starts directly
+        rather than through the queue.
+        """
+        live = self._transcription_worker
+        logger.warning("Live transcription failed at the end (%s); transcribing again", reason)
+        if live is None or self._closing:
+            return
+        live.wait(5000)   # it returns right after emitting fallback
+        self._start_transcription_worker(live.audio_path, getattr(live, "session", None))
 
     def _cancel_transcription(self):
         if self._transcription_worker and self._transcription_worker.isRunning():
@@ -1549,6 +1642,11 @@ class MainWindow(QMainWindow):
         """
         if self._transcription_worker is not None and self._transcription_worker.isRunning():
             self._transcription_worker.cancel()
+        # Live workers still waiting for their job (#139) are cancelled too.
+        live_workers = list(self._live_workers.values())
+        self._live_workers.clear()
+        for live in live_workers:
+            live.cancel()
         workers = [
             self._transcription_worker,
             self._diarization_worker,
@@ -1556,6 +1654,7 @@ class MainWindow(QMainWindow):
             self._summarize_worker,
             self.chat_panel.active_worker(),
             self.recordings_list.active_search_worker(),
+            *live_workers,
         ]
         for worker in workers:
             if worker is None or not worker.isRunning():

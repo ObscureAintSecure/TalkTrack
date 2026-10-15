@@ -43,6 +43,13 @@ The level meter and waveform see the processed signal (what's actually being rec
 - In-progress recordings write final filenames; that's safe because `metadata.json` only
   appears at stop, and it feeds the recovered-recordings salvage (writers flush ~5s so crashed
   WAVs stay header-valid).
+- **Track files are read while they are written** when live transcription is on (#139):
+  `LiveTranscriptionWorker` opens each writer's `.path` read-only on every poll and reads up to
+  the frame count in the last flushed header. Keep tracks as WAVs that are valid mid-recording,
+  keep the writers' paths in `DualAudioCapture._writers`, and keep `combined_audio.wav` an
+  index-aligned mix (0.5/0.5, peak-normalized; a lone track copied verbatim), or the live mix
+  stops matching the final one. Stop goes through `RecordingState.STOPPING` first, and
+  MainWindow makes the workers stop reading there, before the writers close and the mix runs.
 
 ## WASAPI loopback and WAV-flush facts (verified on real hardware)
 

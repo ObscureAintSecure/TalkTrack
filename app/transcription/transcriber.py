@@ -1,9 +1,12 @@
+import logging
 import math
 import os
 import threading
 from pathlib import Path
 from dataclasses import dataclass, field, fields
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
+
+logger = logging.getLogger(__name__)
 
 # Loaded Whisper models keyed by (model_size, device, compute_type).
 # Loading costs seconds-to-tens-of-seconds per recording; models stay
@@ -166,6 +169,11 @@ class TranscriptionWorker(QThread):
             self.progress.emit("Loading transcription model...")
 
             device = self.device
+            if device == "intel_gpu":
+                if self._run_openvino():
+                    return
+                device = "cpu"
+
             if device == "cuda":
                 try:
                     import torch
@@ -246,3 +254,53 @@ class TranscriptionWorker(QThread):
             )
         except Exception as e:
             self.error.emit(f"Transcription failed: {e}")
+
+    def _run_openvino(self):
+        """Transcribe on the Intel GPU via OpenVINO GenAI.
+
+        Returns True when the job ended here (finished or cancelled), False to
+        have run() continue on the CPU. Any OpenVINO failure, at load or
+        mid-run, falls back: a driver hang ("device lost") must not cost the
+        user the transcript. Unreadable audio raises instead, since the CPU
+        would fail the same way.
+        """
+        from app.transcription import openvino_whisper as ovw
+        try:
+            pipeline = ovw.get_pipeline(self.model_size, progress=self.progress.emit)
+        except Exception as e:
+            logger.warning("Intel GPU transcription unavailable, using CPU", exc_info=True)
+            self.progress.emit(f"Intel GPU (OpenVINO) unavailable ({e}) — falling back to CPU.")
+            return False
+
+        if self._cancel_requested:
+            self.cancelled.emit()
+            return True
+
+        from faster_whisper import decode_audio
+        audio = decode_audio(self.audio_path, sampling_rate=ovw.SAMPLE_RATE)
+        result = TranscriptResult(
+            language=self.language or "",
+            duration=len(audio) / ovw.SAMPLE_RATE,
+        )
+        self.progress.emit("Transcribing audio (Intel GPU)...")
+        try:
+            for batch in ovw.transcribe(pipeline, audio, language=self.language):
+                if not result.language:
+                    result.language = batch.language
+                # OpenVINO reports no per-segment log-probability, so
+                # confidence keeps its 0.0 default (unknown).
+                for start, end, text in batch.segments:
+                    result.segments.append(TranscriptSegment(start=start, end=end, text=text))
+                    self.progress.emit(f"Transcribed: {_format_time(end)}")
+                if self._cancel_requested:
+                    self.cancelled.emit()
+                    return True
+        except Exception as e:
+            logger.warning("Intel GPU transcription failed, retrying on CPU", exc_info=True)
+            ovw.release_pipeline(self.model_size)
+            self.progress.emit(f"Intel GPU transcription failed ({e}) — retrying on CPU.")
+            return False
+
+        self.progress.emit("Transcription complete.")
+        self.finished.emit(result)
+        return True

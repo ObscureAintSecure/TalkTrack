@@ -30,6 +30,8 @@ DEFAULT_CONFIG = {
         "device": "cpu",
         "min_duration": 10,
         "batch_size": 1,
+        # Transcribe while recording (#139); Intel GPU only, opt-in.
+        "live": False,
     },
     "diarization": {
         "enabled": True,
