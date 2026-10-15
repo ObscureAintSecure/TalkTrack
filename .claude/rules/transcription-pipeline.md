@@ -40,10 +40,27 @@ Why this exists: `transcriber._MODEL_CACHE` and `diarizer._PIPELINE_CACHE` are b
 design, so a CUDA run pins the Whisper model and the pyannote pipeline in VRAM at once. `large-v3`
 alone is ~10 GB.
 
+## Speaker embeddings: one network pass per chunk (#133)
+
+`_get_pipeline` swaps the pipeline's `get_embeddings` for `chunk_embeddings.get_embeddings`.
+pyannote runs the WeSpeaker ResNet once per (chunk, local speaker): three passes over the same
+10 s of audio, although only the statistics pooling depends on the speaker. The per-chunk version
+passes `(batch, speakers, frames)` weights, which the model pools in one pass. That step was 96%
+of diarization time, and the change made it ~3x faster on a CPU.
+
+- **The output must stay pyannote's.** Overlap-free mask selection, NaN handling, batch size and
+  the progress hook mirror `SpeakerDiarization.get_embeddings`. Inactive speakers are still
+  pooled with zero weights rather than skipped, since clustering sees their (NaN) rows.
+  `test_chunk_embeddings` restates pyannote's loop and compares; re-check it against
+  pyannote's source when upgrading pyannote.audio.
+- Only pyannote's own WeSpeaker wrapper pools per speaker. `install` leaves other embedding
+  backends (SpeechBrain, NeMo, ONNX) on pyannote's loop, and training keeps pyannote's path.
+
 ## Model caches — resident by design
 
 - `transcriber._MODEL_CACHE` — WhisperModel keyed `(model_size, device, compute_type)`.
 - `diarizer._PIPELINE_CACHE` — pyannote Pipeline keyed `(HF token, resolved device)`.
+- `openvino_whisper._PIPELINE_CACHE` — OpenVINO WhisperPipeline keyed `(model_size, "GPU")`.
 - `provider.get_sentence_transformer()` — shared embed model cache.
 Loading costs seconds-to-tens-of-seconds per recording; models staying in RAM/VRAM between recordings is intentional. Don't "fix" it.
 
@@ -73,3 +90,58 @@ settings.json, so a higher default silently switches every installed copy to bat
 next launch and trades away cross-chunk `condition_on_previous_text`. The default compute device
 is also `cpu`, where there is least parallel-decode headroom to win back. The worker and the
 config declare the default separately, so both are pinned by tests.
+
+## Intel GPU via OpenVINO (#131)
+
+`transcription.device = "intel_gpu"` routes `TranscriptionWorker` to `_run_openvino`, backed by
+`app/transcription/openvino_whisper.py` (no Qt; OpenVINO and faster-whisper imported inside
+functions). faster-whisper (CTranslate2) has no Intel GPU support, so this is a second backend,
+not a device flag.
+
+- **Any OpenVINO failure falls back to the CPU**, at load or mid-run, and evicts the pipeline
+  (`release_pipeline`). Unlike the diarizer's OOM-only retry, failures here are environmental
+  (missing package, no GPU, driver hang `ZE_RESULT_ERROR_DEVICE_LOST`), and the transcript
+  matters more than surfacing them. Unreadable audio raises instead: the CPU would fail too.
+- **VAD is ours to do.** `WhisperPipeline` has none, and Whisper invents text over silence
+  (20 s of silence came back as "E aí"). `speech_regions` uses faster-whisper's Silero VAD;
+  only speech is decoded and `TimeMap` maps times back to the recording.
+- **Batches of ≤ `MAX_BATCH_SECONDS` (60) of speech.** `generate()` blocks and its streamer is
+  unavailable with timestamps on long audio, so batches are the only progress and cancel
+  points. Meeting speech rarely pauses for the VAD's 2 s (one region ran 264 s, which made
+  Cancel wait ~30 s), so the VAD also gets `max_speech_duration_s = MAX_BATCH_SECONDS` and
+  splits long speech at a short pause. Same total time as 120 s batches.
+- **Language is detected once**, on the first batch, then pinned for the rest, as faster-whisper
+  does. A batch must not flip a pt-BR meeting to Spanish halfway.
+- Models are Intel's `OpenVINO/whisper-<size>-int8-ov` builds in the HF cache
+  (`model_cache_dir`; System Status checks that path when Intel GPU is selected). The first
+  load compiles for the GPU (~40 s); the compiled blob is cached in `~/.talktrack/openvino_cache`.
+- OpenVINO returns no per-segment log-probability, so these segments keep `confidence = 0.0`.
+- pyannote stays a torch pipeline on the CPU (`diarizer._resolve_device` maps `intel_gpu` to
+  `cpu`); only its embedding network moves to the GPU, see below.
+- **No NPU option.** On a Core Ultra 7 265U NPU, large-v3-turbo hangs the device
+  (`ZE_RESULT_ERROR_DEVICE_LOST`, 2/2 runs); only small ran. Revisit with newer drivers.
+- The pip spec lives in `openvino_whisper.PIP_PACKAGE`, `package_installer.PROVIDER_PACKAGES`
+  and the `openvino` extra; `test_openvino_whisper.TestPackageDeclarations` keeps them equal.
+
+## Speaker embeddings on the Intel GPU (#135)
+
+With `intel_gpu` selected, `DiarizationWorker` compiles pyannote's WeSpeaker ResNet34 trunk for the
+GPU (`openvino_embeddings.get_trunk`) and hands it to `chunk_embeddings.set_accelerator`. On a
+5-minute excerpt: 267 s (pyannote as is) → 63–100 s (#133, CPU) → 18.5 s, DER 0.0002, centroids
+at cosine ≥ 0.99999.
+
+- **Only the trunk moves.** fbank before it and the per-speaker pooling after it stay in torch
+  on the CPU: they are cheap, and pooling is where each local speaker's weights apply.
+- **Set the accelerator on every run, including to None.** The `cpu` and `intel_gpu` settings
+  share the `(token, "cpu")` pipeline in `_PIPELINE_CACHE`; a stale accelerator would keep
+  using the GPU after the user switched back.
+- **Failures fall back, as transcription does.** At build time (`_intel_gpu_trunk` returns None)
+  the run stays on the CPU. Mid-run, `chunk_embeddings._embed` keeps the error on
+  `accelerator.error` and finishes on the CPU; the worker then calls `release_trunks()` and says so.
+- **The model is converted locally**, since pyannote's weights are gated and cannot ship. First use
+  traces the trunk (~60 s) to `openvino_cache/wespeaker-trunk-<weights hash>.xml`. The hash covers
+  the weights, so a pyannote model update converts again rather than reusing a stale IR.
+- The trunk is compiled with a static shape (embedding batch size × one chunk's fbank frames);
+  short batches are zero-padded. A different shape raises and falls back rather than reshaping.
+- NPU ran the trunk too (1.1 s vs 1.7 s per batch) but compiles in 30 s instead of 5, and is
+  where large-v3-turbo hung. The GPU was as fast end to end, so it is the only target.

@@ -41,7 +41,7 @@ jobs:
         run: |
           python -c "import app.main_window"
           python -c "import app.recording.recorder, app.recording.audio_capture, app.recording.chunk_writer"
-          python -c "import app.transcription.transcriber, app.transcription.diarizer"
+          python -c "import app.transcription.transcriber, app.transcription.diarizer, app.transcription.openvino_whisper"
           python -c "import app.ui.settings_dialog, app.ui.recordings_list, app.ui.transcript_viewer"
           python -c "import app.utils.config, app.utils.dependency_checker, app.utils.wav_prune"
 

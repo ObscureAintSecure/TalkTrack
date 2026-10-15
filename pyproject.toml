@@ -54,6 +54,11 @@ all-ai = [
     "llama-cpp-python>=0.3.0",
 ]
 
+# Whisper on an Intel GPU (Settings > Transcription > Compute Device > Intel
+# GPU). Also installed on demand when that device is chosen. Year-numbered
+# releases; the OpenVINO model builds need 2026.1+.
+openvino = ["openvino-genai>=2026.1,<2027"]
+
 # PyTorch builds, mutually exclusive (enforced by [tool.uv] conflicts below).
 # `cpu` = CPU-only wheels (works on any machine, no NVIDIA card required).
 # `cuda` = CUDA 12.6 wheels for NVIDIA GPU acceleration of transcription and

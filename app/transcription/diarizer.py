@@ -79,6 +79,9 @@ def _get_pipeline(hf_token, device="cpu"):
             "pyannote/speaker-diarization-community-1",
             token=hf_token,
         )
+        from app.transcription import chunk_embeddings
+        if not chunk_embeddings.install(pipeline):
+            logger.info("Speaker embeddings: per-chunk pass unavailable, using pyannote's loop")
         if resolved == "cuda":
             import torch
             try:
@@ -142,6 +145,11 @@ class DiarizationWorker(QThread):
             pipeline, device_used = _get_pipeline(self.hf_token, self.device)
             if device_used == "cuda":
                 self.progress.emit("Running speaker diarization on GPU...")
+            # The CPU pipeline is shared by the "cpu" and "intel_gpu" settings,
+            # so the accelerator is set (or cleared) on every run.
+            from app.transcription import chunk_embeddings
+            trunk = self._intel_gpu_trunk(pipeline) if self.device == "intel_gpu" else None
+            chunk_embeddings.set_accelerator(pipeline, trunk)
 
             self.progress.emit("Loading audio for diarization...")
 
@@ -157,7 +165,10 @@ class DiarizationWorker(QThread):
                 waveform = torch.from_numpy(audio_data.T)
             audio_input = {"waveform": waveform, "sample_rate": sample_rate}
 
-            self.progress.emit("Running speaker diarization...")
+            self.progress.emit(
+                "Running speaker diarization (Intel GPU)..." if trunk is not None
+                else "Running speaker diarization..."
+            )
 
             diarization_params = {}
             if self.min_speakers is not None:
@@ -179,6 +190,16 @@ class DiarizationWorker(QThread):
                 _release_cuda_pipeline(self.hf_token)
                 pipeline, device_used = _get_pipeline(self.hf_token, "cpu")
                 result = pipeline(audio_input, **diarization_params)
+
+            if trunk is not None and trunk.error is not None:
+                # chunk_embeddings already finished the run on the CPU. Evict the
+                # trunk so the next recording rebuilds it instead of reusing it.
+                from app.transcription import openvino_embeddings
+                openvino_embeddings.release_trunks()
+                self.progress.emit(
+                    f"Intel GPU failed during speaker diarization ({trunk.error}) "
+                    "- finished on the CPU."
+                )
 
             # pyannote 4.0 returns DiarizeOutput; extract the Annotation
             if hasattr(result, "speaker_diarization"):
@@ -212,6 +233,26 @@ class DiarizationWorker(QThread):
             )
         except Exception as e:
             self.error.emit(f"Diarization failed: {e}")
+
+    def _intel_gpu_trunk(self, pipeline):
+        """The embedding network compiled for the Intel GPU, or None for the CPU (#135).
+
+        Any failure keeps the CPU, as transcription does (#131): a missing
+        package or a driver problem must not cost the user their speakers.
+        """
+        from app.transcription import chunk_embeddings
+        if not chunk_embeddings.supports(pipeline):
+            return None
+        try:
+            from app.transcription import openvino_embeddings
+            return openvino_embeddings.get_trunk(pipeline, progress=self.progress.emit)
+        except Exception as e:
+            logger.warning("Speaker embeddings on the Intel GPU unavailable, using CPU",
+                           exc_info=True)
+            self.progress.emit(
+                f"Intel GPU unavailable for speaker diarization ({e}) - using the CPU."
+            )
+            return None
 
     def _merge_diarization_with_transcript(self, transcript, speaker_segments):
         """Assign speaker labels to transcript segments based on overlap."""
