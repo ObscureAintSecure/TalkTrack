@@ -55,6 +55,24 @@ The level meter and waveform see the processed signal (what's actually being rec
   crash-readability guarantee depends on this; `test_flush_keeps_file_readable_before_close`
   encodes it.
 
+## Meeting end = the meeting app releasing the microphone
+
+`app/recording/meeting_end.py` reads Windows' microphone privacy store
+(`HKCU\...\CapabilityAccessManager\ConsentStore\microphone`, packaged apps by package family
+name, desktop apps under `NonPackaged` by exe path with `#` for `\`). `LastUsedTimeStop == 0`
+means the app is using the microphone now. A conferencing app holds it for the whole call, muted
+or not, and releases it on leaving.
+
+- Prefer this over audio signals: WASAPI loopback stops delivering packets when the call ends, so
+  the silence clock never advances (#104), and Teams keeps its audio sessions open after a call.
+- Only curated meeting apps count. TalkTrack itself holds the microphone while recording (as
+  `pythonw.exe`), and so do unrelated apps.
+- `MeetingEndWatcher` arms on the first meeting app seen on the microphone and fires once, after
+  every armed app has been off it for 20 s (Teams drops it briefly on a device change). Answering
+  "Keep recording" disarms it until an app takes the microphone again.
+- Registry unreadable or not Windows → no entries → never a prompt. No data must never mean a
+  wrong stop.
+
 ## MainWindow → capture access pattern
 
 - `MainWindow` reaches into `self.recorder._capture` directly for `set_muted`, `set_gain`, etc. This is the established pattern — do **not** add a `Recorder.set_muted`/`set_gain` passthrough. Recorder stays focused on state machine + session lifecycle.

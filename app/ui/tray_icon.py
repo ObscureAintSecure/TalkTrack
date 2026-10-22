@@ -143,6 +143,10 @@ class TrayIcon(QObject):
             5000,
         )
 
+    def show_message(self, title, message, msecs=10000):
+        """A tray notification (shows even when the window is hidden)."""
+        self._tray.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, msecs)
+
     def _on_activated(self, reason):
         if reason in (
             QSystemTrayIcon.ActivationReason.Trigger,

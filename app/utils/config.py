@@ -53,6 +53,7 @@ DEFAULT_CONFIG = {
         "auto_transcribe": True,
         "silence_auto_stop": True,
         "silence_duration": 120,
+        "meeting_end_prompt": True,
         "minimize_to_tray": False,
         "show_tray_hint": True,
         "start_menu_offer_done": False,

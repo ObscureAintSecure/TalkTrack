@@ -1,6 +1,7 @@
 import json
 import logging
 import sys
+import time
 import webbrowser
 from pathlib import Path
 from datetime import datetime
@@ -22,6 +23,9 @@ from app.recording.audio_capture import LoopbackStream
 from app.recording.process_audio_capture import ProcessAudioCapture
 from app.recording.mic_monitor import MicMonitor
 from app.recording.recorder import Recorder, RecordingState
+from app.recording.meeting_end import (
+    MeetingEndWatcher, meeting_apps_using_mic, read_mic_usage,
+)
 from app.transcription.transcriber import TranscriptionWorker, TranscriptResult
 from app.transcription.diarizer import DiarizationWorker, SimpleDiarizeWorker
 from app.ui.recording_controls import RecordingControls
@@ -70,6 +74,14 @@ class MainWindow(QMainWindow):
         self._auto_record_timer = QTimer(self)
         self._auto_record_timer.setSingleShot(True)
         self._auto_record_timer.timeout.connect(self._on_auto_record_timer_fired)
+
+        # Meeting-end prompt: while recording, watch which meeting apps hold
+        # the microphone; when they all let go, ask whether to stop.
+        self._meeting_end_watcher = None
+        self._meeting_end_dialog = None
+        self._meeting_end_timer = QTimer(self)
+        self._meeting_end_timer.setInterval(2000)
+        self._meeting_end_timer.timeout.connect(self._poll_meeting_end)
 
         self.setWindowTitle("TalkTrack - Call Recorder, Transcriber & AI Summarizer")
         self.setMinimumSize(1000, 700)
@@ -621,6 +633,7 @@ class MainWindow(QMainWindow):
 
     def _on_state_changed(self, state):
         self.recording_controls.set_state(state)
+        self._update_meeting_end_watch(state)
         self.source_selector.set_enabled(state == RecordingState.IDLE)
         if hasattr(self, "tray") and self.tray.is_supported():
             self.tray.set_state(state, int(self.recorder.get_elapsed_time()))
@@ -642,6 +655,63 @@ class MainWindow(QMainWindow):
             self.waveform.set_mic_muted(False)
             self._current_capture_failures = {}
             self.source_selector.mark_capture_failures({})
+
+    # --- Meeting-end prompt ---
+
+    def _update_meeting_end_watch(self, state):
+        """One watcher per recording: from the first RECORDING until it stops."""
+        if state in (RecordingState.RECORDING, RecordingState.PAUSED):
+            if self._meeting_end_watcher is None and self.config.get("general", "meeting_end_prompt"):
+                self._meeting_end_watcher = MeetingEndWatcher()
+                self._meeting_end_timer.start()
+            return
+        self._meeting_end_timer.stop()
+        self._meeting_end_watcher = None
+        if self._meeting_end_dialog is not None:
+            self._meeting_end_dialog.dismiss()
+            self._meeting_end_dialog = None
+
+    def _poll_meeting_end(self):
+        watcher = self._meeting_end_watcher
+        if watcher is None:
+            return
+        try:
+            apps = meeting_apps_using_mic(read_mic_usage())
+        except Exception:
+            logger.debug("Meeting-end poll failed", exc_info=True)
+            return
+        ended = watcher.update(apps, time.monotonic())
+        if ended:
+            self._show_meeting_end_prompt(ended)
+
+    def _show_meeting_end_prompt(self, apps):
+        from app.ui.meeting_end_dialog import MeetingEndDialog, format_apps
+
+        logger.info("Meeting end: %s stopped using the microphone; asking to stop", ", ".join(apps))
+        if self._meeting_end_dialog is not None:
+            self._meeting_end_dialog.dismiss()
+        dialog = MeetingEndDialog(apps, parent=self)
+        dialog.stop_requested.connect(self._on_meeting_end_stop)
+        dialog.keep_requested.connect(self._on_meeting_end_keep)
+        self._meeting_end_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        if hasattr(self, "tray") and self.tray.is_supported():
+            self.tray.show_message(
+                "Meeting ended?",
+                f"{format_apps(apps)} stopped using the microphone. TalkTrack is still recording.",
+            )
+
+    def _on_meeting_end_stop(self):
+        self._meeting_end_dialog = None
+        if self.recorder.state in (RecordingState.RECORDING, RecordingState.PAUSED):
+            logger.info("Meeting end: stopping the recording")
+            self._stop_recording()
+
+    def _on_meeting_end_keep(self):
+        self._meeting_end_dialog = None
+        logger.info("Meeting end: user kept recording")
 
     def _on_recording_tick(self, seconds):
         if hasattr(self, "tray") and self.tray.is_supported():

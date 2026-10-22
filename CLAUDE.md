@@ -49,6 +49,7 @@ TalkTrack/
       audio_capture.py                 # AudioStream, DualAudioCapture (legacy + per-app modes)
       chunk_writer.py                  # ChunkWriter: streams capture audio to disk (#32)
       process_audio_capture.py         # ProcessCaptureStream, ProcessAudioCapture (Win11 per-PID)
+      meeting_end.py                   # Meeting apps' microphone use (ConsentStore) -> "meeting ended?" prompt
       recorder.py                      # State machine, session management
     transcription/
       transcriber.py                   # Whisper worker + dataclasses
@@ -115,6 +116,7 @@ TalkTrack/
     test_chat.py                       # Chat context builder tests
     test_wav_prune.py                  # WAV-superseded-by-MP3 prune planning tests
     test_recorder.py                   # MP3 conversion + WAV replacement tests
+    test_meeting_end.py                # Meeting-end detection from microphone use, MainWindow wiring
     test_recordings_salvage.py         # Crash-orphan salvage tests
     test_diarizer.py                   # Diarization device selection + CUDA OOM fallback tests
     test_system_monitor_start.py       # Test Mic monitor construction regression (#79)
@@ -171,6 +173,7 @@ TalkTrack/
 - **Multi-select bulk delete:** select multiple recordings and delete at once (Ctrl/Shift+click)
 - **Custom app icon:** Start Menu shortcut (offered on first run) targets the venv interpreter and carries the icon + AppUserModelID for a correct taskbar icon
 - **About dialog:** version info and Buy Me a Coffee donation link
+- **Meeting-end prompt (Settings > General, on by default):** while recording, watches which meeting apps (Teams, Zoom, Webex, Slack, browsers) hold the microphone; 20 s after they all let go, a stay-on-top dialog asks whether to stop, and stops on its own after 60 s without an answer
 - **Silence auto-stop:** monitors system/app audio (not mic) for sustained silence, auto-stops recording after configurable duration (Settings > General)
 - **Continue from here:** checkbox next to Play All — click any segment to start continuous playback from that point
 - **Smart scroll during playback:** auto-scroll to playing segment is suppressed if user has manually scrolled away

@@ -84,6 +84,15 @@ class SettingsDialog(QDialog):
         )
         recording_form.addRow("Silence duration:", self.silence_duration_spin)
 
+        self.meeting_end_prompt_cb = QCheckBox("Ask to stop when the meeting app leaves the call")
+        self.meeting_end_prompt_cb.setToolTip(
+            "While recording, watch which meeting apps (Teams, Zoom, Webex,\n"
+            "Slack, browsers) are using the microphone. When they all let go\n"
+            "of it, ask whether to stop; with no answer the recording stops\n"
+            "after 60 seconds."
+        )
+        recording_form.addRow(self.meeting_end_prompt_cb)
+
         self.mic_mute_on_start_cb = QCheckBox("Start recordings with microphone muted")
         self.mic_mute_on_start_cb.setToolTip(
             "When checked, new recordings begin with the mic muted.\n"
@@ -387,6 +396,7 @@ class SettingsDialog(QDialog):
         self.auto_transcribe_cb.setChecked(self.config.get("general", "auto_transcribe"))
         self.silence_auto_stop_cb.setChecked(self.config.get("general", "silence_auto_stop"))
         self.silence_duration_spin.setValue(self.config.get("general", "silence_duration"))
+        self.meeting_end_prompt_cb.setChecked(self.config.get("general", "meeting_end_prompt"))
         self.mic_mute_on_start_cb.setChecked(self.config.get("audio", "mic_mute_on_start"))
         self.minimize_to_tray_cb.setChecked(self.config.get("general", "minimize_to_tray"))
 
@@ -481,6 +491,7 @@ class SettingsDialog(QDialog):
         self.config.set("general", "auto_transcribe", self.auto_transcribe_cb.isChecked())
         self.config.set("general", "silence_auto_stop", self.silence_auto_stop_cb.isChecked())
         self.config.set("general", "silence_duration", self.silence_duration_spin.value())
+        self.config.set("general", "meeting_end_prompt", self.meeting_end_prompt_cb.isChecked())
         self.config.set("audio", "mic_mute_on_start", self.mic_mute_on_start_cb.isChecked())
         self.config.set("general", "minimize_to_tray", self.minimize_to_tray_cb.isChecked())
 
