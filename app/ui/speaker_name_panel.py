@@ -27,6 +27,46 @@ def _extract_speakers(segments):
     return sorted(speakers)
 
 
+def speaker_turns(segments, speaker_id):
+    """Indices of the segments where a turn by speaker_id starts.
+
+    A turn is a run of consecutive segments by the same speaker, so jumping
+    through turns skips the rest of a long monologue.
+    """
+    turns = []
+    previous = None
+    for i, seg in enumerate(segments):
+        if seg.speaker == speaker_id and previous != speaker_id:
+            turns.append(i)
+        previous = seg.speaker
+    return turns
+
+
+def next_turn(turns, after_index):
+    """The first turn after after_index, wrapping round to the first one.
+
+    Returns (segment index, 1-based position in turns), or None without turns.
+    after_index is -1 to start from the beginning.
+    """
+    if not turns:
+        return None
+    for position, index in enumerate(turns, start=1):
+        if index > after_index:
+            return index, position
+    return turns[0], 1
+
+
+def _speaker_summary(segments, speaker_id):
+    """Tooltip text for a speaker: turns and talk time."""
+    turns = len(speaker_turns(segments, speaker_id))
+    seconds = sum(s.end - s.start for s in segments if s.speaker == speaker_id)
+    minutes, secs = divmod(int(round(seconds)), 60)
+    talk = f"{minutes} min {secs:02d} s" if minutes else f"{secs} s"
+    plural = "turn" if turns == 1 else "turns"
+    return (f"{turns} {plural}, {talk} of speech.\n"
+            "Click to jump to this speaker's next turn in the transcript.")
+
+
 class SpeakerNamePanel(QWidget):
     """Collapsible panel for mapping speaker IDs to friendly names.
 
@@ -34,6 +74,7 @@ class SpeakerNamePanel(QWidget):
     """
 
     names_changed = pyqtSignal(dict)  # {speaker_id: name}
+    jump_requested = pyqtSignal(str)  # speaker_id whose next turn to show
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -41,6 +82,7 @@ class SpeakerNamePanel(QWidget):
         self._speaker_ids = []
         self._name_edits = {}  # speaker_id -> QLineEdit
         self._speaker_names = {}  # speaker_id -> name str
+        self._turn_labels = {}  # speaker_id -> QLabel showing "3/12"
         self._collapsed = config.get("ui", "speakers_collapsed") if config else False
         self._setup_ui()
         self.hide()  # hidden until speakers exist
@@ -92,6 +134,7 @@ class SpeakerNamePanel(QWidget):
 
         # Clear existing rows
         self._name_edits.clear()
+        self._turn_labels.clear()
         while self._rows_layout.count():
             item = self._rows_layout.takeAt(0)
             if item.widget():
@@ -110,11 +153,28 @@ class SpeakerNamePanel(QWidget):
             swatch.setFixedWidth(20)
             row_layout.addWidget(swatch)
 
-            # Speaker ID label
-            id_label = QLabel(speaker_id)
-            id_label.setStyleSheet("color: #a6adc8; font-size: 12px;")
-            id_label.setFixedWidth(100)
-            row_layout.addWidget(id_label)
+            # Speaker ID: a link to the speaker's turns in the transcript
+            id_link = QPushButton(speaker_id)
+            id_link.setFlat(True)
+            id_link.setCursor(Qt.CursorShape.PointingHandCursor)
+            id_link.setStyleSheet(
+                "QPushButton { color: #a6adc8; font-size: 12px; border: none; "
+                "background: transparent; padding: 0; min-width: 0; text-align: left; }"
+                "QPushButton:hover { color: #89b4fa; text-decoration: underline; }"
+            )
+            id_link.setFixedWidth(100)
+            id_link.setToolTip(_speaker_summary(segments, speaker_id))
+            id_link.clicked.connect(
+                lambda _checked=False, sid=speaker_id: self.jump_requested.emit(sid)
+            )
+            row_layout.addWidget(id_link)
+
+            # "3/12" once the user has jumped to one of this speaker's turns
+            turn_label = QLabel()
+            turn_label.setStyleSheet("color: #585b70; font-size: 11px;")
+            turn_label.setFixedWidth(40)
+            row_layout.addWidget(turn_label)
+            self._turn_labels[speaker_id] = turn_label
 
             # Arrow
             arrow = QLabel("\u2192")
@@ -151,6 +211,11 @@ class SpeakerNamePanel(QWidget):
                 self._toggle_collapsed()
             self._name_edits[speaker_id].setFocus()
             self._name_edits[speaker_id].selectAll()
+
+    def set_turn_position(self, speaker_id, position, total):
+        """Show which of the speaker's turns is on screen ("3/12"); clear the others."""
+        for sid, label in self._turn_labels.items():
+            label.setText(f"{position}/{total}" if sid == speaker_id else "")
 
     def _on_name_changed(self, text):
         """Emit names_changed whenever any name field changes."""

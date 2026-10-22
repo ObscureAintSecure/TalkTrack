@@ -146,7 +146,7 @@ TalkTrack/
   - Full diarization (pyannote.audio): identifies individual speakers
 - **System Status Panel:** startup dependency health check (Help > System Status)
 - **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
-- **Speaker naming:** assign friendly names to diarized speakers, saved per recording
+- **Speaker naming:** assign friendly names to diarized speakers, saved per recording. Each speaker ID in the Speakers panel is a link: clicking it scrolls the transcript to that speaker's next turn ("3/12"), so someone who barely spoke is easy to find
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names

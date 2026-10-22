@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QLabel, QProgressBar, QFileDialog, QScrollArea, QCheckBox,
     QApplication, QToolTip,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QShortcut, QKeySequence
 
 from app.transcription.transcriber import TranscriptResult, TranscriptSegment
@@ -54,6 +54,9 @@ class TranscriptViewer(QWidget):
         self._continuous_play = False
         self._user_scrolled = False  # True when user manually scrolled during playback
         self._programmatic_scroll = False  # guard to ignore our own scrolls
+        self._jump_speaker = None  # speaker whose turns the Speakers panel is walking
+        self._jump_index = -1  # segment last jumped to from the Speakers panel
+        self._flash_index = -1  # segment briefly highlighted after that jump
         self._setup_ui()
 
     def _setup_ui(self):
@@ -97,6 +100,7 @@ class TranscriptViewer(QWidget):
         from app.ui.speaker_name_panel import SpeakerNamePanel
         self.speaker_panel = SpeakerNamePanel(config=self._config)
         self.speaker_panel.names_changed.connect(self._on_speaker_names_changed)
+        self.speaker_panel.jump_requested.connect(self._jump_to_speaker)
         layout.addWidget(self.speaker_panel)
 
         # Find/replace bar
@@ -234,6 +238,9 @@ class TranscriptViewer(QWidget):
             self._speaker_colors[speaker] = SPEAKER_COLORS[i % len(SPEAKER_COLORS)]
 
         # Clear existing segment widgets
+        self._jump_speaker = None
+        self._jump_index = -1
+        self._flash_index = -1
         self._segment_widgets.clear()
         while self._segments_layout.count():
             item = self._segments_layout.takeAt(0)
@@ -285,6 +292,9 @@ class TranscriptViewer(QWidget):
         self._audio_path = None
 
         # Remove segment widgets
+        self._jump_speaker = None
+        self._jump_index = -1
+        self._flash_index = -1
         self._segment_widgets.clear()
         while self._segments_layout.count():
             item = self._segments_layout.takeAt(0)
@@ -469,6 +479,49 @@ class TranscriptViewer(QWidget):
 
     def _on_speaker_label_clicked(self, speaker_id):
         self.speaker_panel.focus_speaker(speaker_id)
+
+    def _jump_to_speaker(self, speaker_id):
+        """Scroll to the speaker's next turn; repeated clicks walk through them."""
+        from app.ui.speaker_name_panel import next_turn, speaker_turns
+
+        if not self._transcript or not self._segment_widgets:
+            return
+        turns = speaker_turns(self._transcript.segments, speaker_id)
+        # Another speaker starts from their first turn: that is the one that
+        # is hard to find when someone barely spoke.
+        after = self._jump_index if speaker_id == self._jump_speaker else -1
+        found = next_turn(turns, after)
+        if found is None:
+            return
+        index, position = found
+        self._jump_speaker = speaker_id
+        self._jump_index = index
+        self.speaker_panel.set_turn_position(speaker_id, position, len(turns))
+
+        widget = self._segment_widgets[index]
+        self._programmatic_scroll = True
+        # Put the turn near the top, with the line before it for context.
+        self.scroll_area.verticalScrollBar().setValue(max(0, widget.y() - 40))
+        self._programmatic_scroll = False
+        self._flash_segment(index)
+
+    def _flash_segment(self, index):
+        """Highlight a segment for a moment so the eye finds it after a jump."""
+        self._unflash()
+        if index == self._playing_index:
+            return  # already highlighted by playback
+        self._flash_index = index
+        self._segment_widgets[index].setStyleSheet(
+            "background-color: #45475a; border-radius: 4px;"
+        )
+        QTimer.singleShot(1500, lambda i=index: self._unflash(i))
+
+    def _unflash(self, index=None):
+        if self._flash_index < 0 or (index is not None and index != self._flash_index):
+            return
+        if self._flash_index < len(self._segment_widgets) and self._flash_index != self._playing_index:
+            self._segment_widgets[self._flash_index].setStyleSheet("")
+        self._flash_index = -1
 
     # --- Find/replace ---
 
