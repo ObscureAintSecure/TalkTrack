@@ -74,6 +74,7 @@ TalkTrack/
       segment_widget.py               # Interactive transcript segment row
       settings_dialog.py              # Settings dialog with tabs
       speaker_name_panel.py           # Collapsible speaker name mapping panel
+      speaker_name_suggestions.py     # Names used in other recordings, for the panel's autocomplete
       status_panel.py                 # System status dialog (dependency health checks)
       transcript_viewer.py            # Display + export transcripts (with interactive segments)
       notes_panel.py                  # Call notes with timestamps
@@ -104,6 +105,7 @@ TalkTrack/
     test_segment_player.py            # Audio clip playback tests
     test_recording_header.py          # RecordingHeader helper tests
     test_speaker_name_panel.py        # SpeakerNamePanel helper tests
+    test_speaker_name_suggestions.py  # Speaker name autocomplete: ranking, accent-free matching
     test_segment_widget.py            # SegmentWidget helper tests
     test_level_meter.py                # Audio level meter tests
     test_waveform_display.py           # Waveform ring buffer tests
@@ -146,7 +148,7 @@ TalkTrack/
   - Full diarization (pyannote.audio): identifies individual speakers
 - **System Status Panel:** startup dependency health check (Help > System Status)
 - **Interactive transcript viewer:** per-segment audio playback, inline text editing, speaker name mapping
-- **Speaker naming:** assign friendly names to diarized speakers, saved per recording
+- **Speaker naming:** assign friendly names to diarized speakers, saved per recording; typing suggests the names used in other recordings (any word, ignoring case and accents), so one person keeps one spelling
 - **Recording header:** shows loaded recording info (name, date, duration, speakers) with rename
 - Color-coded transcript with speaker labels and timestamps
 - Export transcript to TXT, SRT (subtitles), or JSON with speaker names

@@ -1,8 +1,10 @@
 """Collapsible speaker name editing panel."""
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QCompleter
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QStringListModel, pyqtSignal
+
+from app.ui.speaker_name_suggestions import known_speaker_names, matching_names
 
 
 # Speaker colors — must match the list in transcript_viewer.py
@@ -41,6 +43,7 @@ class SpeakerNamePanel(QWidget):
         self._speaker_ids = []
         self._name_edits = {}  # speaker_id -> QLineEdit
         self._speaker_names = {}  # speaker_id -> name str
+        self._known_names = []  # names used in other recordings, most used first
         self._collapsed = config.get("ui", "speakers_collapsed") if config else False
         self._setup_ui()
         self.hide()  # hidden until speakers exist
@@ -84,6 +87,8 @@ class SpeakerNamePanel(QWidget):
         if not self._speaker_ids:
             self.hide()
             return
+
+        self._known_names = self._load_known_names()
 
         self.show()
         arrow = "\u25b6" if self._collapsed else "\u25bc"
@@ -130,6 +135,7 @@ class SpeakerNamePanel(QWidget):
             if existing_name:
                 name_edit.setText(existing_name)
             name_edit.textChanged.connect(self._on_name_changed)
+            self._attach_suggestions(speaker_id, name_edit)
             row_layout.addWidget(name_edit)
 
             self._name_edits[speaker_id] = name_edit
@@ -155,6 +161,45 @@ class SpeakerNamePanel(QWidget):
     def _on_name_changed(self, text):
         """Emit names_changed whenever any name field changes."""
         self.names_changed.emit(self.get_speaker_names())
+
+    # --- Name suggestions ---
+
+    def _load_known_names(self):
+        """Names used in the other recordings, so one person keeps one spelling."""
+        if not self._config:
+            return []
+        try:
+            return known_speaker_names(self._config.get("output", "directory"))
+        except Exception:
+            return []  # suggestions are a convenience; never block naming
+
+    def _attach_suggestions(self, speaker_id, name_edit):
+        """Pop up matching known names while the user types in name_edit.
+
+        The completer is filled by matching_names, not by Qt's own prefix
+        filter, so a name matches by any word, ignoring case and accents.
+        """
+        model = QStringListModel(name_edit)
+        completer = QCompleter(model, name_edit)
+        completer.setWidget(name_edit)
+        completer.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
+        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        completer.setMaxVisibleItems(8)
+        completer.activated[str].connect(name_edit.setText)
+        name_edit.textEdited.connect(
+            lambda text: self._show_suggestions(speaker_id, text, model, completer)
+        )
+
+    def _show_suggestions(self, speaker_id, text, model, completer):
+        used_elsewhere = [
+            name for sid, name in self.get_speaker_names().items() if sid != speaker_id
+        ]
+        names = matching_names(self._known_names, text, exclude=used_elsewhere)
+        model.setStringList(names)
+        if names:
+            completer.complete()
+        else:
+            completer.popup().hide()
 
     def _toggle_collapsed(self):
         self._collapsed = not self._collapsed
